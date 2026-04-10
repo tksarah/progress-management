@@ -12,6 +12,7 @@ const emptyForm = {
   status: "",
   rank: "",
   dealSize: "",
+  leadSource: "",
   externalStakeholders: "",
   internalDepartments: "",
   customer: "",
@@ -25,13 +26,25 @@ const emptyForm = {
 const defaultCategoryOptions = ["営業", "マーケティング"]
 const defaultAssigneeOptions = ["山﨑", "倉持", "西田"]
 const defaultStatusOptions = ["進捗中", "計画中", "クローズ", "保留"]
-const defaultRankOptions = ["A", "B", "C", "D", "X"]
+const defaultRankOptions = ["A", "B", "C", "D", "X1", "X2", "1"]
 const kpiOptions = ["①", "②", "③", "④", "⑤"]
 const reportHistoryStorageKey = "progress-tracker-report-history"
 const reportPresetOptions = [
   { value: "7", label: "直近1週間", days: 7 },
   { value: "14", label: "直近2週間", days: 14 },
   { value: "custom", label: "範囲指定" }
+]
+
+const rankChartPalette = [
+  "#0d5ea6",
+  "#2c7be5",
+  "#15aabf",
+  "#2f9e77",
+  "#f08c00",
+  "#d9485f",
+  "#7950f2",
+  "#5f6b7a",
+  "#c2255c"
 ]
 
 const tableColumnDefinitions = [
@@ -43,6 +56,7 @@ const tableColumnDefinitions = [
   { key: "customer", label: "顧客名", render: (item) => truncateText(item.customer) },
   { key: "rank", label: "ランク", render: (item) => item.rank || "-" },
   { key: "dealSize", label: "ディールサイズ", render: (item) => truncateText(formatDealSizeDisplay(item.dealSize)) },
+  { key: "leadSource", label: "リード元", render: (item) => item.leadSource || "-" },
   { key: "content", label: "内容", render: (item) => truncateText(item.content) },
   { key: "nextAction", label: "Next Action", render: (item) => truncateText(item.nextAction) },
   { key: "reportMemo", label: "報告メモ", render: (item) => truncateText(item.reportMemo) }
@@ -153,6 +167,54 @@ function formatDealSizeDisplay(value) {
 
 function formatKpiDisplay(value) {
   return String(value || "").trim() || "-"
+}
+
+function formatDealSizeUnitsLabel(value) {
+  return `${value.toLocaleString("ja-JP")}万円`
+}
+
+function describeRankShare(value, total) {
+  if (!total) {
+    return "0.0"
+  }
+
+  return ((value / total) * 100).toFixed(1)
+}
+
+function buildRankDonutGradient(rows, totalUnits) {
+  if (!totalUnits || rows.length === 0) {
+    return "conic-gradient(from -105deg, transparent 0deg 360deg)"
+  }
+
+  let currentAngle = 0
+  const segments = []
+
+  rows.forEach((row) => {
+    const sweepAngle = (row.totalUnits / totalUnits) * 360
+    const gapAngle = Math.min(3.2, sweepAngle / 5)
+    const startAngle = currentAngle
+    const endAngle = currentAngle + sweepAngle
+    const visibleStart = sweepAngle > gapAngle ? startAngle + gapAngle / 2 : startAngle
+    const visibleEnd = sweepAngle > gapAngle ? endAngle - gapAngle / 2 : endAngle
+
+    if (visibleStart > startAngle) {
+      segments.push(`transparent ${startAngle.toFixed(2)}deg ${visibleStart.toFixed(2)}deg`)
+    }
+
+    segments.push(`${row.color} ${visibleStart.toFixed(2)}deg ${visibleEnd.toFixed(2)}deg`)
+
+    if (visibleEnd < endAngle) {
+      segments.push(`transparent ${visibleEnd.toFixed(2)}deg ${endAngle.toFixed(2)}deg`)
+    }
+
+    currentAngle = endAngle
+  })
+
+  if (currentAngle < 360) {
+    segments.push(`transparent ${currentAngle.toFixed(2)}deg 360deg`)
+  }
+
+  return `conic-gradient(from -105deg, ${segments.join(", ")})`
 }
 
 // 履歴保存は削除されました
@@ -330,6 +392,45 @@ function formatReportLine(item) {
   return `・${formatKpiDisplay(item.kpiNumber)} ${item.assignee}: 更新あり`
 }
 
+function RankDealDonutChart({ rows, totalUnits, totalCount }) {
+  const donutGradient = buildRankDonutGradient(rows, totalUnits)
+
+  return (
+    <div className="rank-chart-panel">
+      <div className="rank-chart-head">
+        <span className="rank-chart-label">ランク別</span>
+        <p className="rank-chart-copy">ディールサイズの構成比</p>
+      </div>
+
+      <div className="rank-donut-stage">
+        <div className="rank-donut-shell" role="img" aria-label="ランク別ディールサイズ構成">
+          <div className="rank-donut-aura" aria-hidden="true" />
+          <div className="rank-donut-track" aria-hidden="true" />
+          <div className="rank-donut" style={{ "--rank-donut-gradient": donutGradient }} aria-hidden="true" />
+          <div className="rank-donut-center">
+            <span>総ディールサイズ</span>
+            <strong>{formatDealSizeUnitsLabel(totalUnits)}</strong>
+            <small>{totalCount.toLocaleString("ja-JP")}件 / {rows.length}ランク</small>
+          </div>
+        </div>
+      </div>
+
+      <div className="rank-legend" role="list" aria-label="ランク別凡例">
+        {rows.map((row) => (
+          <article className="rank-legend-item" key={row.rank} role="listitem">
+            <span className="rank-legend-swatch" style={{ "--legend-color": row.color }} aria-hidden="true" />
+            <div>
+              <strong>{row.rank}</strong>
+              <span>{formatDealSizeUnitsLabel(row.totalUnits)}</span>
+              <small>{describeRankShare(row.totalUnits, totalUnits)}%</small>
+            </div>
+          </article>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function normalizeProgressPayload(payload) {
   const content = payload.content.trim()
 
@@ -341,6 +442,7 @@ function normalizeProgressPayload(payload) {
     status: payload.status.trim(),
     rank: payload.rank.trim(),
     dealSize: normalizeDealSizeInputValue(payload.dealSize),
+    leadSource: String(payload.leadSource || "").trim(),
     externalStakeholders: payload.externalStakeholders.trim(),
     internalDepartments: payload.internalDepartments.trim(),
     customer: payload.customer.trim(),
@@ -488,7 +590,7 @@ function buildInvalidReportDraft(items, errorMessage) {
   }
 }
 
-function SortableTagList({ items, onRemove, onMove }) {
+function SortableTagList({ items, onRemove, onMove, showRemove = true }) {
   return (
     <div className="settings-sortable-list">
       {items.map((item, index) => (
@@ -497,7 +599,9 @@ function SortableTagList({ items, onRemove, onMove }) {
           <div className="settings-item-actions">
             <button type="button" className="secondary-button table-action" onClick={() => onMove(index, -1)} disabled={index === 0}>上へ</button>
             <button type="button" className="secondary-button table-action" onClick={() => onMove(index, 1)} disabled={index === items.length - 1}>下へ</button>
-            <button type="button" className="secondary-button table-action danger-action" onClick={() => onRemove(item)}>削除</button>
+            {showRemove ? (
+              <button type="button" className="secondary-button table-action danger-action" onClick={() => onRemove(item)}>削除</button>
+            ) : null}
           </div>
         </div>
       ))}
@@ -560,9 +664,8 @@ function SettingsModal({
   onToggleColumn,
   onMoveColumn,
   onClose,
-  onSave,
-  saving,
-  error
+  error,
+  saving
 }) {
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -630,17 +733,6 @@ function SettingsModal({
               <span>{settingsDraft.visibleColumns.length}列を表示</span>
             </div>
             <p className="hint">No. と 操作 は固定表示です。その他の表示列を切り替えられます。</p>
-            <p className="hint settings-sort-hint">表示中の列は上下ボタンで順序変更できます。</p>
-            <SortableTagList
-              items={settingsDraft.visibleColumns.map((key) => tableColumnDefinitions.find((column) => column.key === key)?.label || key)}
-              onRemove={(label) => {
-                const column = tableColumnDefinitions.find((item) => item.label === label)
-                if (column) {
-                  onToggleColumn(column.key)
-                }
-              }}
-              onMove={onMoveColumn}
-            />
             <div className="settings-column-grid">
               {tableColumnDefinitions.map((column) => (
                 <label className="settings-checkbox" key={column.key}>
@@ -653,6 +745,18 @@ function SettingsModal({
                 </label>
               ))}
             </div>
+            <p className="hint settings-sort-hint">表示中の列は上下ボタンで順序変更できます。</p>
+            <SortableTagList
+              items={settingsDraft.visibleColumns.map((key) => tableColumnDefinitions.find((column) => column.key === key)?.label || key)}
+              onRemove={(label) => {
+                const column = tableColumnDefinitions.find((item) => item.label === label)
+                if (column) {
+                  onToggleColumn(column.key)
+                }
+              }}
+              onMove={onMoveColumn}
+              showRemove={false}
+            />
             <p className="hint">最低1列は選択してください。</p>
           </section>
         </div>
@@ -660,12 +764,60 @@ function SettingsModal({
         <p className="hint settings-current-path">現在の保存先: <span className="path-label">{settingsDraft.excelFilePath || "未設定"}</span></p>
 
         <div className="confirm-modal-actions">
-          <button type="button" className="secondary-button" onClick={onClose} disabled={saving}>キャンセル</button>
-          <button type="button" className="settings-button" onClick={onSave} disabled={saving}>設定を保存</button>
+          <button type="button" className="secondary-button" onClick={onClose}>閉じる</button>
         </div>
         {error ? <p className="message error compact-message">{error}</p> : null}
       </section>
     </div>
+  )
+}
+
+function StartupWizard({ startupState, saving, error, onOpenExisting, onCreateNew }) {
+  return (
+    <section className="startup-shell">
+      <div className="startup-card">
+        <div className="startup-head">
+          <div>
+            <p className="eyebrow">STARTUP WIZARD</p>
+            <h2>起動方法を選択してください</h2>
+            <p className="hero-copy startup-copy">
+              初回起動時、または前回指定した Excel が見つからない場合は、利用する Excel ファイルをここで選択します。
+            </p>
+          </div>
+          <span className="pill alt">Excel 未選択</span>
+        </div>
+
+        {startupState.hasMissingConfiguredExcel ? (
+          <div className="message error compact-message">
+            前回指定された Excel が見つかりません: <span className="path-label">{startupState.configuredExcelPath}</span>
+          </div>
+        ) : null}
+
+        <div className="startup-choice-grid">
+          <article className="startup-choice-card">
+            <p className="eyebrow">CREATE NEW</p>
+            <h3>新規で Excel 名を指定して起動</h3>
+            <p className="hint startup-choice-copy">
+              保存先とファイル名を指定して、新しい Excel を作成してからアプリを開きます。
+            </p>
+            <p className="hint startup-path-hint">推奨パス: <span className="path-label">{startupState.suggestedNewExcelPath}</span></p>
+            <button type="button" onClick={onCreateNew} disabled={saving}>新規 Excel を指定</button>
+          </article>
+
+          <article className="startup-choice-card">
+            <p className="eyebrow">OPEN EXISTING</p>
+            <h3>既存の Excel で起動</h3>
+            <p className="hint startup-choice-copy">
+              既に使っている Excel ファイルを選択して、その内容を読み込んで開きます。
+            </p>
+            <p className="hint startup-path-hint">共有フォルダ上の .xlsx も選択できます。</p>
+            <button type="button" className="secondary-button" onClick={onOpenExisting} disabled={saving}>既存 Excel を選択</button>
+          </article>
+        </div>
+
+        {error ? <p className="message error compact-message">{error}</p> : null}
+      </div>
+    </section>
   )
 }
 
@@ -687,6 +839,18 @@ function ProgressForm({
   const statusSelectOptions = withCurrentOption(statusOptions, form.status)
   const rankSelectOptions = withCurrentOption(rankOptions, form.rank)
 
+  const leadSourceOptions = [
+    "TDW",
+    "主催・共催イベント",
+    "オフラインイベント",
+    "アウトバウンド",
+    "社内",
+    "個別ネットワーキング"
+  ]
+  const leadSourceSelectOptions = withCurrentOption(leadSourceOptions, form.leadSource)
+
+  const salesContentTemplate = "* 概要：\n* Budget / Authority / Need / Timeline：\n* コンペリングイベント：\n"
+
   return (
     <form className="detail-form" onSubmit={onSubmit}>
       <label>
@@ -704,11 +868,17 @@ function ProgressForm({
           value={form.category}
           onChange={(event) => {
             const nextCategory = event.target.value
+            const nextContent =
+              nextCategory === "営業" && !String(form.content ?? "").trim()
+                ? salesContentTemplate
+                : form.content
             onChange({
               ...form,
               category: nextCategory,
               rank: nextCategory === "営業" ? form.rank : "",
-              dealSize: nextCategory === "営業" ? form.dealSize : ""
+              dealSize: nextCategory === "営業" ? form.dealSize : "",
+              leadSource: nextCategory === "営業" ? form.leadSource : "",
+              content: nextContent
             })
           }}
           required
@@ -745,6 +915,15 @@ function ProgressForm({
               <option value="">選択してください</option>
               {rankSelectOptions.map((rank) => (
                 <option key={rank} value={rank}>{rank}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>リード元</span>
+            <select value={form.leadSource} onChange={(event) => onChange({ ...form, leadSource: event.target.value })}>
+              <option value="">選択してください</option>
+              {leadSourceSelectOptions.map((source) => (
+                <option key={source} value={source}>{source}</option>
               ))}
             </select>
           </label>
@@ -845,9 +1024,14 @@ export default function App() {
   const [duplicateSaving, setDuplicateSaving] = useState(false)
   const [duplicateError, setDuplicateError] = useState("")
   const [deleteTarget, setDeleteTarget] = useState(null)
+  const [startupState, setStartupState] = useState(null)
+  const [startupError, setStartupError] = useState("")
 
-  async function loadData(nextQuery = query, nextStatus = statusFilter) {
-    setLoading(true)
+  async function loadData(nextQuery = query, nextStatus = statusFilter, manageLoading = true) {
+    if (manageLoading) {
+      setLoading(true)
+    }
+
     setError("")
 
     try {
@@ -863,6 +1047,7 @@ export default function App() {
       setSettingsPath(normalizedSettings.excelFilePath)
       setDraftPath(normalizedSettings.excelFilePath)
       setPathDirty(false)
+      setStartupState(null)
 
       if (selectedId) {
         const selected = response.items.find((item) => item.id === selectedId)
@@ -877,12 +1062,46 @@ export default function App() {
     } catch (loadError) {
       setError(loadError.message)
     } finally {
+      if (manageLoading) {
+        setLoading(false)
+      }
+    }
+  }
+
+  async function initializeApp() {
+    setLoading(true)
+    setError("")
+    setStartupError("")
+
+    try {
+      const startup = await call("get_startup_state")
+      const normalizedSettings = normalizeAppSettings(startup.settings)
+      const fallbackPath = normalizeExcelPath(startup.suggestedNewExcelPath || "progress.xlsx")
+
+      setAppSettings(normalizedSettings)
+      setSettingsPath(normalizedSettings.excelFilePath)
+      setDraftPath(normalizedSettings.excelFilePath || fallbackPath)
+      setPathDirty(false)
+
+      if (startup.needsOnboarding) {
+        setStartupState({
+          configuredExcelPath: normalizedSettings.excelFilePath,
+          hasMissingConfiguredExcel: startup.hasConfiguredExcel && !startup.configuredExcelExists,
+          suggestedNewExcelPath: fallbackPath
+        })
+        return
+      }
+
+      await loadData("", "", false)
+    } catch (loadError) {
+      setError(loadError.message)
+    } finally {
       setLoading(false)
     }
   }
 
   useEffect(() => {
-    void loadData()
+    void initializeApp()
   }, [])
 
   // 履歴保存機能を削除したため、初期化は不要
@@ -971,10 +1190,11 @@ export default function App() {
       ...Array.from(summaryByRank.keys()).filter((rank) => !appSettings.rankOptions.includes(rank)).sort()
     ]
 
-    const rows = orderedRanks.map((rank) => ({
+    const rows = orderedRanks.map((rank, index) => ({
       rank,
       count: summaryByRank.get(rank)?.count || 0,
-      totalUnits: summaryByRank.get(rank)?.totalUnits || 0
+      totalUnits: summaryByRank.get(rank)?.totalUnits || 0,
+      color: rankChartPalette[index % rankChartPalette.length]
     }))
 
     return {
@@ -1250,6 +1470,63 @@ export default function App() {
     }
   }
 
+  async function handleStartupOpenExisting() {
+    setSaving(true)
+    setStartupError("")
+    setError("")
+    setMessage("")
+
+    try {
+      const selected = await open({
+        multiple: false,
+        directory: false,
+        filters: [
+          {
+            name: "Excel Workbook",
+            extensions: ["xlsx"]
+          }
+        ]
+      })
+
+      if (typeof selected === "string") {
+        await persistExcelPath(selected, "既存の Excel を読み込んで起動しました。")
+        setStartupState(null)
+      }
+    } catch (dialogError) {
+      setStartupError(dialogError.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleStartupCreateNew() {
+    setSaving(true)
+    setStartupError("")
+    setError("")
+    setMessage("")
+
+    try {
+      const selected = await save({
+        filters: [
+          {
+            name: "Excel Workbook",
+            extensions: ["xlsx"]
+          }
+        ],
+        defaultPath: startupState?.suggestedNewExcelPath || normalizeExcelPath(draftPath || "progress.xlsx")
+      })
+
+      if (typeof selected === "string") {
+        await persistExcelPath(selected, "新しい Excel を作成して起動しました。")
+        setStartupState(null)
+      }
+    } catch (dialogError) {
+      setStartupError(dialogError.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
   async function handleExportExcel() {
     setSaving(true)
     setError("")
@@ -1322,54 +1599,60 @@ export default function App() {
       return
     }
 
-    setSettingsDraft((current) => current ? ({
-      ...current,
-      [field]: sanitizeOptionList([...current[field], draftValue])
-    }) : current)
+    const nextDraft = settingsDraft ? ({
+      ...settingsDraft,
+      [field]: sanitizeOptionList([...settingsDraft[field], draftValue])
+    }) : null
+    if (!nextDraft) return
+    setSettingsDraft(nextDraft)
     setSettingsOptionDrafts((current) => ({
       ...current,
       [field]: ""
     }))
     setSettingsError("")
+    void persistSettings(nextDraft)
   }
 
   function handleRemoveOption(field, value) {
-    setSettingsDraft((current) => current ? ({
-      ...current,
-      [field]: current[field].filter((item) => item !== value)
-    }) : current)
+    if (!settingsDraft) return
+    const nextDraft = {
+      ...settingsDraft,
+      [field]: settingsDraft[field].filter((item) => item !== value)
+    }
+    setSettingsDraft(nextDraft)
+    void persistSettings(nextDraft)
   }
 
   function handleMoveOption(field, index, direction) {
-    setSettingsDraft((current) => current ? ({
-      ...current,
-      [field]: reorderList(current[field], index, index + direction)
-    }) : current)
+    if (!settingsDraft) return
+    const nextDraft = {
+      ...settingsDraft,
+      [field]: reorderList(settingsDraft[field], index, index + direction)
+    }
+    setSettingsDraft(nextDraft)
+    void persistSettings(nextDraft)
   }
 
   function handleToggleColumn(columnKey) {
-    setSettingsDraft((current) => {
-      if (!current) {
-        return current
-      }
+    if (!settingsDraft) return
+    const isActive = settingsDraft.visibleColumns.includes(columnKey)
+    const visibleColumns = isActive
+      ? settingsDraft.visibleColumns.filter((item) => item !== columnKey)
+      : [...settingsDraft.visibleColumns, columnKey]
 
-      const isActive = current.visibleColumns.includes(columnKey)
-      const visibleColumns = isActive
-        ? current.visibleColumns.filter((item) => item !== columnKey)
-        : [...current.visibleColumns, columnKey]
-
-      return {
-        ...current,
-        visibleColumns
-      }
-    })
+    const nextDraft = { ...settingsDraft, visibleColumns }
+    setSettingsDraft(nextDraft)
+    void persistSettings(nextDraft)
   }
 
   function handleMoveColumn(index, direction) {
-    setSettingsDraft((current) => current ? ({
-      ...current,
-      visibleColumns: reorderList(current.visibleColumns, index, index + direction)
-    }) : current)
+    if (!settingsDraft) return
+    const nextDraft = {
+      ...settingsDraft,
+      visibleColumns: reorderList(settingsDraft.visibleColumns, index, index + direction)
+    }
+    setSettingsDraft(nextDraft)
+    void persistSettings(nextDraft)
   }
 
   async function handleSaveSettings() {
@@ -1387,6 +1670,23 @@ export default function App() {
       return
     }
 
+    // keep legacy save available but delegate to persistSettings
+    await persistSettings(nextSettings)
+  }
+
+  async function persistSettings(nextDraft) {
+    if (!nextDraft) return
+
+    const nextSettings = normalizeAppSettings({
+      ...nextDraft,
+      excelFilePath: settingsPath || appSettings.excelFilePath
+    })
+
+    if (nextSettings.visibleColumns.length === 0) {
+      setSettingsError("進捗一覧に表示する列を1つ以上選択してください。")
+      return
+    }
+
     setSettingsSaving(true)
     setSettingsError("")
     setMessage("")
@@ -1396,10 +1696,10 @@ export default function App() {
       const response = await call("update_app_settings", {
         settings: nextSettings
       })
-      const normalizedSettings = normalizeAppSettings(response)
 
+      const normalizedSettings = normalizeAppSettings(response)
       setAppSettings(normalizedSettings)
-      setSettingsDraft(null)
+      setSettingsDraft(normalizedSettings)
       setMessage("設定を更新しました。")
     } catch (saveError) {
       setSettingsError(saveError.message)
@@ -1523,30 +1823,25 @@ export default function App() {
       <header className="hero">
         <div>
           <p className="eyebrow">LOCAL EXCEL PROTOTYPE</p>
-          <h1>進捗管理デスクトップ PoC</h1>
+          <h1>進捗管理 App</h1>
           <p className="hero-copy">
             共有フォルダまたはローカルの Excel を直接データソースにして、サーバーなしで一覧確認・登録・更新を行う最小構成です。
           </p>
         </div>
       </header>
 
+      {startupState ? (
+        <StartupWizard
+          startupState={startupState}
+          saving={saving}
+          error={startupError}
+          onOpenExisting={handleStartupOpenExisting}
+          onCreateNew={handleStartupCreateNew}
+        />
+      ) : (
+        <>
       <main className="content-grid">
-        <section className="card settings-card">
-          <h2>Excel 保存先</h2>
-          <div className="inline-form">
-            <input
-              value={draftPath}
-              onBlur={handlePathInputBlur}
-              onChange={handlePathInputChange}
-              onKeyDown={handlePathInputKeyDown}
-              placeholder="C:\\Users\\...\\progress.xlsx または \\\\server\\share\\progress.xlsx"
-            />
-            <button type="button" className="secondary-button" data-path-action="true" onClick={handleBrowseExcel} disabled={saving}>参照</button>
-            <button type="button" className="secondary-button" data-path-action="true" onClick={handleCreateExcel} disabled={saving}>新規作成</button>
-          </div>
-          <p className="hint settings-current-path">現在の保存先: <span className="path-label">{settingsPath || "未設定"}</span></p>
-          <p className="hint">手入力は Enter またはフォーカス移動で反映されます。既存ファイルは参照、新規ファイルは新規作成を選んだ時点で切り替わります。</p>
-        </section>
+        
 
         <section className="summary-section">
           <div className="summary-export-action">
@@ -1569,40 +1864,14 @@ export default function App() {
               ))}
             </div>
             <div className="summary-breakdown">
-              <div className="summary-breakdown-head">
-                <h3>ランク別ディールサイズ集計</h3>
-                <span>{rankDealSummary.totalUnits.toLocaleString("ja-JP")}万円</span>
-              </div>
               {rankDealSummary.rows.length === 0 ? (
                 <p className="hint">ランクとディールサイズが入力された営業案件はありません。</p>
               ) : (
-                <div className="summary-table-wrap">
-                  <table className="summary-table">
-                    <tbody>
-                      <tr>
-                        <th scope="row">ランク</th>
-                        {rankDealSummary.rows.map((row) => (
-                          <th key={row.rank} scope="col">{row.rank}</th>
-                        ))}
-                        <th scope="col">合計</th>
-                      </tr>
-                      <tr>
-                        <th scope="row">件数</th>
-                        {rankDealSummary.rows.map((row) => (
-                          <td key={`${row.rank}-count`}>{row.count}</td>
-                        ))}
-                        <td>{rankDealSummary.totalCount}</td>
-                      </tr>
-                      <tr>
-                        <th scope="row">ディールサイズ</th>
-                        {rankDealSummary.rows.map((row) => (
-                          <td key={`${row.rank}-units`}>{row.totalUnits.toLocaleString("ja-JP")}万円</td>
-                        ))}
-                        <td>{rankDealSummary.totalUnits.toLocaleString("ja-JP")}万円</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
+                <RankDealDonutChart
+                  rows={rankDealSummary.rows}
+                  totalUnits={rankDealSummary.totalUnits}
+                  totalCount={rankDealSummary.totalCount}
+                />
               )}
             </div>
           </div>
@@ -1744,8 +2013,23 @@ export default function App() {
           {message ? <p className="message success">{message}</p> : null}
           {error ? <p className="message error">{error}</p> : null}
         </section>
+          <section className="card settings-card full-width">
+            <h2>Excel 保存先</h2>
+            <div className="inline-form">
+              <input
+                value={draftPath}
+                onBlur={handlePathInputBlur}
+                onChange={handlePathInputChange}
+                onKeyDown={handlePathInputKeyDown}
+                placeholder="C:\\Users\\...\\progress.xlsx または \\\\server\\share\\progress.xlsx"
+              />
+              <button type="button" className="secondary-button" data-path-action="true" onClick={handleBrowseExcel} disabled={saving}>参照</button>
+              <button type="button" className="secondary-button" data-path-action="true" onClick={handleCreateExcel} disabled={saving}>新規作成</button>
+            </div>
+            <p className="hint settings-current-path">現在の保存先: <span className="path-label">{settingsPath || "未設定"}</span></p>
+            <p className="hint">手入力は Enter またはフォーカス移動で反映されます。既存ファイルは参照、新規ファイルは新規作成を選んだ時点で切り替わります。</p>
+          </section>
       </main>
-
       <div className={`drawer-backdrop ${isDrawerOpen ? "open" : ""}`} onClick={handleCloseDrawer}>
         <aside
           className={`detail-drawer ${isDrawerOpen ? "open" : ""}`}
@@ -1951,9 +2235,8 @@ export default function App() {
           onToggleColumn={handleToggleColumn}
           onMoveColumn={handleMoveColumn}
           onClose={handleCloseSettings}
-          onSave={handleSaveSettings}
-          saving={settingsSaving}
           error={settingsError}
+          saving={settingsSaving}
         />
       ) : null}
 
@@ -2019,6 +2302,8 @@ export default function App() {
           </section>
         </div>
       ) : null}
+        </>
+      )}
     </div>
   )
 }

@@ -35,7 +35,11 @@ function buildSamples() {
   const categories = ['営業','マーケティング','開発','カスタマーサクセス','経理'];
   const names = ['佐藤','鈴木','高橋','伊藤','中村','小林','加藤','吉田','山田','木村','斎藤','松本','井上','橋本','清水'];
   const statuses = ['進捗中','計画中','保留','クローズ','失注'];
-  const dealSizes = ['','50万円','1200万円','300万円','2500万円','800万円','150万円'];
+  // Generate deterministic sample deal sizes in the range [10, 500]
+  function sampleDealSize(i) {
+    // map i to a value between 10 and 500 inclusive
+    return ((i * 31) % 491) + 10;
+  }
   const external = ['田中部長、ABC商事購買','広告代理店X','DEF工業 情報システム部','制作会社Y','GHI物流 役員会','顧客J','パートナーK'];
   const internal = ['営業企画、法務','広報、デザイン','導入支援','インサイドセールス','カスタマーサクセス、経理','開発','経理'];
   const customers = ['ABC商事','DEF工業','GHI物流','JKLホールディングス','MNOシステム','顧客X','顧客Y'];
@@ -52,7 +56,7 @@ function buildSamples() {
     const name = names[idx % names.length];
     const status = statuses[idx % statuses.length];
     const rank = (i % 7 === 0) ? 'S' : (i % 3 === 0) ? 'B' : (i % 4 === 0) ? 'A' : '';
-    const deal = rank ? dealSizes[i % dealSizes.length] : '';
+    const deal = sampleDealSize(i);
     const ext = external[idx % external.length];
     const intd = internal[idx % internal.length];
     const cust = customers[idx % customers.length];

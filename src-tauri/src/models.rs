@@ -24,7 +24,9 @@ fn default_rank_options() -> Vec<String> {
         "B".to_string(),
         "C".to_string(),
         "D".to_string(),
-        "X".to_string(),
+        "X1".to_string(),
+        "X2".to_string(),
+        "1".to_string(),
     ]
 }
 
@@ -51,6 +53,8 @@ pub struct ProgressItem {
     pub status: String,
     pub rank: String,
     pub deal_size: String,
+    #[serde(default)]
+    pub lead_source: String,
     pub external_stakeholders: String,
     pub internal_departments: String,
     pub customer: String,
@@ -73,6 +77,8 @@ pub struct ProgressPayload {
     pub status: String,
     pub rank: String,
     pub deal_size: String,
+    #[serde(default)]
+    pub lead_source: String,
     pub external_stakeholders: String,
     pub internal_departments: String,
     pub customer: String,
@@ -98,6 +104,16 @@ pub struct DashboardResponse {
     pub summary: Summary,
     pub excel_file_path: String,
     pub settings: AppSettings,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StartupState {
+    pub settings: AppSettings,
+    pub has_configured_excel: bool,
+    pub configured_excel_exists: bool,
+    pub needs_onboarding: bool,
+    pub suggested_new_excel_path: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

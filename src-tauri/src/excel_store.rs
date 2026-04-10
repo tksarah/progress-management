@@ -2,6 +2,7 @@ use crate::models::{AppSettings, ProgressItem, ProgressPayload, Summary};
 use calamine::{open_workbook_auto, Reader};
 use chrono::Utc;
 use rust_xlsxwriter::{Color, Format, Workbook};
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fs;
@@ -9,7 +10,8 @@ use std::path::Path;
 use uuid::Uuid;
 
 const SHEET_NAME: &str = "Progress";
-const HEADERS: [&str; 17] = [
+const SETTINGS_SHEET_NAME: &str = "AppSettings";
+const HEADERS: [&str; 18] = [
     "RowID",
     "KPI番号",
     "カテゴリー",
@@ -19,6 +21,7 @@ const HEADERS: [&str; 17] = [
     "ステータス",
     "ランク",
     "ディールサイズ",
+    "リード元",
     "社外関係者",
     "社内関連部署",
     "顧客名",
@@ -44,6 +47,47 @@ const LEGACY_HEADERS: [&str; 13] = [
     "更新者",
     "Version",
 ];
+
+const SETTINGS_HEADERS: [&str; 2] = ["Key", "Value"];
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkbookSettingsData {
+    category_options: Vec<String>,
+    assignee_options: Vec<String>,
+    status_options: Vec<String>,
+    rank_options: Vec<String>,
+    visible_columns: Vec<String>,
+}
+
+fn workbook_settings_from_app_settings(settings: &AppSettings) -> WorkbookSettingsData {
+    WorkbookSettingsData {
+        category_options: settings.category_options.clone(),
+        assignee_options: settings.assignee_options.clone(),
+        status_options: settings.status_options.clone(),
+        rank_options: settings.rank_options.clone(),
+        visible_columns: settings.visible_columns.clone(),
+    }
+}
+
+fn app_settings_from_workbook_settings(data: WorkbookSettingsData) -> AppSettings {
+    AppSettings {
+        excel_file_path: String::new(),
+        category_options: data.category_options,
+        assignee_options: data.assignee_options,
+        status_options: data.status_options,
+        rank_options: data.rank_options,
+        visible_columns: data.visible_columns,
+    }
+}
+
+fn serialize_setting_value(values: &[String]) -> Result<String, String> {
+    serde_json::to_string(values).map_err(|error| error.to_string())
+}
+
+fn deserialize_setting_value(raw_value: &str) -> Result<Vec<String>, String> {
+    serde_json::from_str(raw_value).map_err(|error| error.to_string())
+}
 
 fn parse_deal_size_units(value: &str) -> Option<u64> {
     let trimmed = value.trim();
@@ -93,6 +137,37 @@ fn normalize_sales_fields(category: &str, rank: String, deal_size: String) -> Re
     }
 }
 
+fn normalize_lead_source(category: &str, lead_source: String) -> String {
+    if category == "営業" {
+        lead_source.trim().to_string()
+    } else {
+        String::new()
+    }
+}
+
+fn validate_lead_source(category: &str, lead_source: &str) -> Result<(), String> {
+    let trimmed = lead_source.trim();
+
+    if category != "営業" || trimmed.is_empty() {
+        return Ok(());
+    }
+
+    let allowed = [
+        "TDW",
+        "主催・共催イベント",
+        "オフラインイベント",
+        "アウトバウンド",
+        "社内",
+        "個別ネットワーキング",
+    ];
+
+    if allowed.iter().any(|value| value == &trimmed) {
+        Ok(())
+    } else {
+        Err("リード元 は指定された候補から選択してください。".to_string())
+    }
+}
+
 fn normalize_content(content: &str) -> String {
     let trimmed = content.trim();
 
@@ -103,7 +178,60 @@ fn normalize_content(content: &str) -> String {
     }
 }
 
-fn write_workbook(path: &Path, items: &[ProgressItem]) -> Result<(), String> {
+fn write_settings_sheet(workbook: &mut Workbook, settings: &AppSettings) -> Result<(), String> {
+    let worksheet = workbook.add_worksheet();
+    let header_format = Format::new()
+        .set_bold()
+        .set_background_color(Color::RGB(0xE9EEF6));
+    let workbook_settings = workbook_settings_from_app_settings(settings);
+    let rows = [
+        (
+            "categoryOptions",
+            serialize_setting_value(&workbook_settings.category_options)?,
+        ),
+        (
+            "assigneeOptions",
+            serialize_setting_value(&workbook_settings.assignee_options)?,
+        ),
+        (
+            "statusOptions",
+            serialize_setting_value(&workbook_settings.status_options)?,
+        ),
+        (
+            "rankOptions",
+            serialize_setting_value(&workbook_settings.rank_options)?,
+        ),
+        (
+            "visibleColumns",
+            serialize_setting_value(&workbook_settings.visible_columns)?,
+        ),
+    ];
+
+    worksheet
+        .set_name(SETTINGS_SHEET_NAME)
+        .map_err(|error| error.to_string())?;
+    worksheet.set_hidden(true);
+
+    for (column, header) in SETTINGS_HEADERS.iter().enumerate() {
+        worksheet
+            .write_with_format(0, column as u16, *header, &header_format)
+            .map_err(|error| error.to_string())?;
+    }
+
+    for (index, (key, value)) in rows.iter().enumerate() {
+        let row = (index + 1) as u32;
+        worksheet
+            .write_string(row, 0, *key)
+            .map_err(|error| error.to_string())?;
+        worksheet
+            .write_string(row, 1, value)
+            .map_err(|error| error.to_string())?;
+    }
+
+    Ok(())
+}
+
+fn write_workbook(path: &Path, items: &[ProgressItem], settings: &AppSettings) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
@@ -137,6 +265,7 @@ fn write_workbook(path: &Path, items: &[ProgressItem]) -> Result<(), String> {
             item.status.clone(),
             item.rank.clone(),
             item.deal_size.clone(),
+            item.lead_source.clone(),
             item.external_stakeholders.clone(),
             item.internal_departments.clone(),
             item.customer.clone(),
@@ -154,21 +283,94 @@ fn write_workbook(path: &Path, items: &[ProgressItem]) -> Result<(), String> {
         }
     }
 
+    write_settings_sheet(&mut workbook, settings)?;
+
     workbook.save(path).map_err(|error| error.to_string())
 }
 
-pub fn ensure_workbook(path: &Path) -> Result<(), String> {
+pub fn load_embedded_settings(path: &Path) -> Result<Option<AppSettings>, String> {
     if !path.exists() {
-        write_workbook(path, &[])?;
+        return Ok(None);
+    }
+
+    let mut workbook = open_workbook_auto(path).map_err(|error| error.to_string())?;
+
+    if !workbook.sheet_names().iter().any(|sheet_name| sheet_name == SETTINGS_SHEET_NAME) {
+        return Ok(None);
+    }
+
+    let range = workbook
+        .worksheet_range(SETTINGS_SHEET_NAME)
+        .map_err(|error| error.to_string())?;
+    let mut rows = range.rows();
+    let _header = rows
+        .next()
+        .ok_or_else(|| "設定シートが空です。".to_string())?;
+    let mut values = HashMap::new();
+
+    for row in rows {
+        let key = row.first().map(ToString::to_string).unwrap_or_default();
+        let value = row.get(1).map(ToString::to_string).unwrap_or_default();
+
+        if !key.trim().is_empty() {
+            values.insert(key, value);
+        }
+    }
+
+    let data = WorkbookSettingsData {
+        category_options: deserialize_setting_value(
+            values
+                .get("categoryOptions")
+                .ok_or_else(|| "設定シートに categoryOptions がありません。".to_string())?,
+        )?,
+        assignee_options: deserialize_setting_value(
+            values
+                .get("assigneeOptions")
+                .ok_or_else(|| "設定シートに assigneeOptions がありません。".to_string())?,
+        )?,
+        status_options: deserialize_setting_value(
+            values
+                .get("statusOptions")
+                .ok_or_else(|| "設定シートに statusOptions がありません。".to_string())?,
+        )?,
+        rank_options: deserialize_setting_value(
+            values
+                .get("rankOptions")
+                .ok_or_else(|| "設定シートに rankOptions がありません。".to_string())?,
+        )?,
+        visible_columns: deserialize_setting_value(
+            values
+                .get("visibleColumns")
+                .ok_or_else(|| "設定シートに visibleColumns がありません。".to_string())?,
+        )?,
+    };
+
+    Ok(Some(app_settings_from_workbook_settings(data)))
+}
+
+pub fn save_embedded_settings(path: &Path, settings: &AppSettings) -> Result<(), String> {
+    let items = if path.exists() { read_items(path)? } else { Vec::new() };
+    write_workbook(path, &items, settings)
+}
+
+pub fn ensure_workbook(path: &Path, settings: &AppSettings) -> Result<(), String> {
+    if !path.exists() {
+        write_workbook(path, &[], settings)?;
+        return Ok(());
     }
 
     let _ = read_items(path)?;
+
+    if load_embedded_settings(path)?.is_none() {
+        save_embedded_settings(path, settings)?;
+    }
+
     Ok(())
 }
 
 pub fn read_items(path: &Path) -> Result<Vec<ProgressItem>, String> {
     if !path.exists() {
-        write_workbook(path, &[])?;
+        return Err("Excel ファイルが見つかりません。".to_string());
     }
 
     let mut workbook = open_workbook_auto(path).map_err(|error| error.to_string())?;
@@ -232,6 +434,7 @@ pub fn read_items(path: &Path) -> Result<Vec<ProgressItem>, String> {
             status: get("ステータス"),
             rank: get("ランク"),
             deal_size: get("ディールサイズ"),
+            lead_source: get("リード元"),
             external_stakeholders: get("社外関係者"),
             internal_departments: get("社内関連部署"),
             customer: get("顧客名"),
@@ -298,6 +501,8 @@ fn validate_payload(payload: &ProgressPayload, settings: &AppSettings) -> Result
         normalize_deal_size(&payload.deal_size)?;
     }
 
+    validate_lead_source(&payload.category, &payload.lead_source)?;
+
     Ok(())
 }
 
@@ -306,6 +511,7 @@ pub fn create_item(path: &Path, settings: &AppSettings, payload: ProgressPayload
     let mut items = read_items(path)?;
     let now = Utc::now().to_rfc3339();
     let (rank, deal_size) = normalize_sales_fields(&payload.category, payload.rank, payload.deal_size)?;
+    let lead_source = normalize_lead_source(&payload.category, payload.lead_source);
     let content = normalize_content(&payload.content);
     let updated_by = payload.assignee.trim().to_string();
 
@@ -319,6 +525,7 @@ pub fn create_item(path: &Path, settings: &AppSettings, payload: ProgressPayload
         status: payload.status,
         rank,
         deal_size,
+        lead_source,
         external_stakeholders: payload.external_stakeholders,
         internal_departments: payload.internal_departments,
         customer: payload.customer,
@@ -330,7 +537,7 @@ pub fn create_item(path: &Path, settings: &AppSettings, payload: ProgressPayload
     };
 
     items.push(item.clone());
-    write_workbook(path, &items)?;
+    write_workbook(path, &items, settings)?;
     Ok(item)
 }
 
@@ -349,6 +556,7 @@ pub fn update_item(path: &Path, settings: &AppSettings, id: &str, payload: Progr
     }
 
     let (rank, deal_size) = normalize_sales_fields(&payload.category, payload.rank, payload.deal_size)?;
+    let lead_source = normalize_lead_source(&payload.category, payload.lead_source);
     let content = normalize_content(&payload.content);
 
     target.kpi_number = payload.kpi_number;
@@ -357,6 +565,7 @@ pub fn update_item(path: &Path, settings: &AppSettings, id: &str, payload: Progr
     target.status = payload.status;
     target.rank = rank;
     target.deal_size = deal_size;
+    target.lead_source = lead_source;
     target.external_stakeholders = payload.external_stakeholders;
     target.internal_departments = payload.internal_departments;
     target.customer = payload.customer;
@@ -368,11 +577,11 @@ pub fn update_item(path: &Path, settings: &AppSettings, id: &str, payload: Progr
     target.version += 1;
 
     let item = target.clone();
-    write_workbook(path, &items)?;
+    write_workbook(path, &items, settings)?;
     Ok(item)
 }
 
-pub fn delete_item(path: &Path, id: &str) -> Result<(), String> {
+pub fn delete_item(path: &Path, settings: &AppSettings, id: &str) -> Result<(), String> {
     let mut items = read_items(path)?;
     let original_len = items.len();
     items.retain(|item| item.id != id);
@@ -381,7 +590,7 @@ pub fn delete_item(path: &Path, id: &str) -> Result<(), String> {
         return Err("対象データが見つかりません。".to_string());
     }
 
-    write_workbook(path, &items)
+    write_workbook(path, &items, settings)
 }
 
 pub fn build_summary(items: &[ProgressItem]) -> Summary {
