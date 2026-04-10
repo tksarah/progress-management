@@ -1,0 +1,34 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "Progress Tracker PoC",
+  "version": "0.1.0-beta.1",
+  "identifier": "com.demo.progresstracker",
+  "build": {
+    "beforeDevCommand": "npm.cmd --workspace frontend run dev",
+    "beforeBuildCommand": "npm.cmd --workspace frontend run build",
+    "devUrl": "http://localhost:5173",
+    "frontendDist": "../frontend/dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "進捗管理 PoC",
+        "width": 1440,
+        "height": 960,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "nsis",
+    "icon": [
+      "icons/icon.ico"
+    ]
+  }
+}
+
