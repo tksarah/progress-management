@@ -1,6 +1,6 @@
 use crate::models::{AppSettings, ProgressItem, ProgressPayload, Summary};
 use calamine::{open_workbook_auto, Reader};
-use chrono::Utc;
+use chrono::{DateTime, FixedOffset, NaiveDate, TimeZone, Utc};
 use rust_xlsxwriter::{Color, Format, Workbook};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -11,8 +11,9 @@ use uuid::Uuid;
 
 const SHEET_NAME: &str = "Progress";
 const SETTINGS_SHEET_NAME: &str = "AppSettings";
-const HEADERS: [&str; 18] = [
+const HEADERS: [&str; 19] = [
     "RowID",
+    "タイトル",
     "KPI番号",
     "カテゴリー",
     "担当者名",
@@ -173,6 +174,7 @@ fn validate_lead_source(category: &str, lead_source: &str, settings: &AppSetting
         "アウトバウンド",
         "社内",
         "個別ネットワーキング",
+        "ウェビナー",
     ];
 
     if allowed.iter().any(|value| value == &trimmed) {
@@ -190,6 +192,34 @@ fn normalize_content(content: &str) -> String {
     } else {
         trimmed.to_string()
     }
+}
+
+fn normalize_updated_at(value: Option<String>) -> Result<String, String> {
+    let trimmed = value.unwrap_or_default().trim().to_string();
+
+    if trimmed.is_empty() {
+        return Ok(Utc::now().to_rfc3339());
+    }
+
+    if let Ok(parsed) = DateTime::parse_from_rfc3339(&trimmed) {
+        return Ok(parsed.with_timezone(&Utc).to_rfc3339());
+    }
+
+    if let Ok(parsed) = NaiveDate::parse_from_str(&trimmed, "%Y-%m-%d") {
+        let offset = FixedOffset::east_opt(9 * 60 * 60)
+            .ok_or_else(|| "更新日のタイムゾーンを解決できません。".to_string())?;
+        let date_time = parsed
+            .and_hms_opt(0, 0, 0)
+            .ok_or_else(|| "更新日の時刻を生成できません。".to_string())?;
+        let zoned = offset
+            .from_local_datetime(&date_time)
+            .single()
+            .ok_or_else(|| "更新日を解釈できません。".to_string())?;
+
+        return Ok(zoned.with_timezone(&Utc).to_rfc3339());
+    }
+
+    Err("更新日は YYYY-MM-DD 形式で入力してください。".to_string())
 }
 
 fn write_settings_sheet(workbook: &mut Workbook, settings: &AppSettings) -> Result<(), String> {
@@ -275,6 +305,7 @@ fn write_workbook(path: &Path, items: &[ProgressItem], settings: &AppSettings) -
         let row = (row_index + 1) as u32;
         let values = [
             item.id.clone(),
+            item.title.clone(),
             item.kpi_number.clone(),
             item.category.clone(),
             item.assignee.clone(),
@@ -449,6 +480,7 @@ pub fn read_items(path: &Path) -> Result<Vec<ProgressItem>, String> {
 
         items.push(ProgressItem {
             id,
+            title: get("タイトル"),
             kpi_number: get("KPI番号"),
             category: get("カテゴリー"),
             assignee: get("担当者名"),
@@ -532,7 +564,7 @@ fn validate_payload(payload: &ProgressPayload, settings: &AppSettings) -> Result
 pub fn create_item(path: &Path, settings: &AppSettings, payload: ProgressPayload) -> Result<ProgressItem, String> {
     validate_payload(&payload, settings)?;
     let mut items = read_items(path)?;
-    let now = Utc::now().to_rfc3339();
+    let updated_at = normalize_updated_at(payload.updated_at.clone())?;
     let (rank, deal_size) = normalize_sales_fields(&payload.category, payload.rank, payload.deal_size)?;
     let lead_source = normalize_lead_source(&payload.category, payload.lead_source);
     let content = normalize_content(&payload.content);
@@ -540,11 +572,12 @@ pub fn create_item(path: &Path, settings: &AppSettings, payload: ProgressPayload
 
     let item = ProgressItem {
         id: Uuid::new_v4().to_string(),
+        title: payload.title.trim().to_string(),
         kpi_number: payload.kpi_number,
         category: payload.category,
         assignee: payload.assignee,
-        created_at: now.clone(),
-        updated_at: now,
+        created_at: updated_at.clone(),
+        updated_at,
         status: payload.status,
         rank,
         deal_size,
@@ -581,8 +614,10 @@ pub fn update_item(path: &Path, settings: &AppSettings, id: &str, payload: Progr
     let (rank, deal_size) = normalize_sales_fields(&payload.category, payload.rank, payload.deal_size)?;
     let lead_source = normalize_lead_source(&payload.category, payload.lead_source);
     let content = normalize_content(&payload.content);
+    let updated_at = normalize_updated_at(payload.updated_at.clone())?;
 
     target.kpi_number = payload.kpi_number;
+    target.title = payload.title.trim().to_string();
     target.category = payload.category;
     target.assignee = payload.assignee;
     target.status = payload.status;
@@ -596,7 +631,7 @@ pub fn update_item(path: &Path, settings: &AppSettings, id: &str, payload: Progr
     target.next_action = payload.next_action;
     target.report_memo = payload.report_memo;
     target.updated_by = target.assignee.clone();
-    target.updated_at = Utc::now().to_rfc3339();
+    target.updated_at = updated_at;
     target.version += 1;
 
     let item = target.clone();

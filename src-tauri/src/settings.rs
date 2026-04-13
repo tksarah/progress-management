@@ -6,6 +6,14 @@ use std::fs;
 use std::path::PathBuf;
 
 const DEFAULT_VISIBLE_COLUMNS: [&str; 6] = ["status", "kpiNumber", "category", "assignee", "updatedAt", "content"];
+const LEGACY_DEFAULT_LEAD_SOURCE_OPTIONS: [&str; 6] = [
+    "TDW",
+    "主催・共催イベント",
+    "オフラインイベント",
+    "アウトバウンド",
+    "社内",
+    "個別ネットワーキング",
+];
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -26,6 +34,7 @@ fn normalize_list(values: Vec<String>) -> Vec<String> {
 
 fn normalize_visible_columns(values: Vec<String>) -> Vec<String> {
     let allowed = BTreeSet::from([
+        "title".to_string(),
         "status".to_string(),
         "kpiNumber".to_string(),
         "category".to_string(),
@@ -100,6 +109,13 @@ pub fn normalize_settings(mut settings: AppSettings) -> Result<AppSettings, Stri
     settings.status_options = normalize_list(settings.status_options);
     settings.rank_options = normalize_list(settings.rank_options);
     settings.lead_source_options = normalize_list(settings.lead_source_options);
+    let legacy_default_lead_sources = LEGACY_DEFAULT_LEAD_SOURCE_OPTIONS
+        .iter()
+        .map(|value| value.to_string())
+        .collect::<Vec<String>>();
+    if settings.lead_source_options == legacy_default_lead_sources {
+        settings.lead_source_options.push("ウェビナー".to_string());
+    }
     // Migrate legacy single 'X' rank to new options if the user hasn't already customized
     let current_ranks = settings.rank_options.clone();
     let has_new_ranks = current_ranks.iter().any(|v| v == "X1" || v == "X2" || v == "1");

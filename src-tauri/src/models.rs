@@ -49,6 +49,7 @@ fn default_lead_source_options() -> Vec<String> {
         "アウトバウンド".to_string(),
         "社内".to_string(),
         "個別ネットワーキング".to_string(),
+        "ウェビナー".to_string(),
     ]
 }
 
@@ -56,6 +57,8 @@ fn default_lead_source_options() -> Vec<String> {
 #[serde(rename_all = "camelCase")]
 pub struct ProgressItem {
     pub id: String,
+    #[serde(default)]
+    pub title: String,
     pub kpi_number: String,
     pub category: String,
     pub assignee: String,
@@ -80,6 +83,8 @@ pub struct ProgressItem {
 #[serde(rename_all = "camelCase")]
 pub struct ProgressPayload {
     pub id: Option<String>,
+    #[serde(default)]
+    pub title: String,
     pub kpi_number: String,
     pub category: String,
     pub assignee: String,

@@ -64,7 +64,8 @@ fn get_dashboard(query: Option<String>, status: Option<String>) -> Result<Dashbo
                 true
             } else {
                 format!(
-                    "{} {} {} {} {} {}",
+                    "{} {} {} {} {} {} {}",
+                    item.title,
                     item.kpi_number,
                     item.assignee,
                     item.customer,

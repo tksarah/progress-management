@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { invoke } from "@tauri-apps/api/core"
 import { open, save } from "@tauri-apps/plugin-dialog"
 
@@ -6,6 +6,8 @@ const pageSize = 10
 
 const emptyForm = {
   id: "",
+  title: "",
+  updatedAtInput: "",
   kpiNumber: "",
   category: "",
   assignee: "",
@@ -47,15 +49,16 @@ const rankChartPalette = [
   "#c2255c"
 ]
 
-const defaultLeadSourceOptions = ["TDW", "主催・共催イベント", "オフラインイベント", "アウトバウンド", "社内", "個別ネットワーキング"]
+const defaultLeadSourceOptions = ["TDW", "主催・共催イベント", "オフラインイベント", "アウトバウンド", "社内", "個別ネットワーキング", "ウェビナー"]
 
 const tableColumnDefinitions = [
+  { key: "title", label: "タイトル", render: (item) => truncateText(item.title) },
   { key: "status", label: "ステータス", render: (item) => item.status || "-" },
   { key: "kpiNumber", label: "KPI", render: (item) => item.kpiNumber || "-" },
   { key: "category", label: "カテゴリ", render: (item) => item.category || "-" },
   { key: "assignee", label: "担当者", render: (item) => item.assignee || "-" },
   { key: "updatedAt", label: "更新日", render: (item) => formatDate(item.updatedAt) },
-  { key: "customer", label: "顧客名", render: (item) => truncateText(item.customer) },
+  { key: "customer", label: "顧客名 / Project 名", render: (item) => truncateText(item.customer || "-") },
   { key: "rank", label: "ランク", render: (item) => item.rank || "-" },
   { key: "dealSize", label: "ディールサイズ", render: (item) => truncateText(formatDealSizeDisplay(item.dealSize)) },
   { key: "leadSource", label: "リード元", render: (item) => item.leadSource || "-" },
@@ -84,6 +87,23 @@ function reorderList(items, fromIndex, toIndex) {
   const nextItems = [...items]
   const [movedItem] = nextItems.splice(fromIndex, 1)
   nextItems.splice(toIndex, 0, movedItem)
+  return nextItems
+}
+
+function insertListItem(items, fromIndex, toIndex) {
+  if (fromIndex < 0 || fromIndex >= items.length || toIndex < 0 || toIndex > items.length) {
+    return items
+  }
+
+  const nextItems = [...items]
+  const [movedItem] = nextItems.splice(fromIndex, 1)
+  const adjustedIndex = fromIndex < toIndex ? toIndex - 1 : toIndex
+
+  if (adjustedIndex === fromIndex) {
+    return items
+  }
+
+  nextItems.splice(adjustedIndex, 0, movedItem)
   return nextItems
 }
 
@@ -226,6 +246,7 @@ function buildRankDonutGradient(rows, totalUnits) {
 function toReportSnapshot(items) {
   return items.map((item) => ({
     id: item.id,
+    title: item.title,
     kpiNumber: item.kpiNumber,
     assignee: item.assignee,
     status: item.status,
@@ -242,6 +263,7 @@ function hasItemChanged(previousItem, currentItem) {
   }
 
   return previousItem.updatedAt !== currentItem.updatedAt
+    || previousItem.title !== currentItem.title
     || previousItem.status !== currentItem.status
     || previousItem.content !== currentItem.content
     || previousItem.nextAction !== currentItem.nextAction
@@ -440,6 +462,7 @@ function normalizeProgressPayload(payload) {
 
   return {
     ...payload,
+    title: String(payload.title || "").trim(),
     kpiNumber: payload.kpiNumber.trim(),
     category: payload.category.trim(),
     assignee: payload.assignee.trim(),
@@ -453,6 +476,7 @@ function normalizeProgressPayload(payload) {
     content: content || "空です",
     nextAction: payload.nextAction.trim(),
     reportMemo: payload.reportMemo.trim(),
+    updatedAt: payload.updatedAtInput ? payload.updatedAtInput.trim() : null,
     updatedBy: payload.assignee.trim()
   }
 }
@@ -462,6 +486,7 @@ function toFormState(item) {
     ...item,
     kpiNumber: String(item.kpiNumber || "").trim(),
     dealSize: normalizeDealSizeInputValue(item.dealSize),
+    updatedAtInput: formatDateInputValue(item.updatedAt),
     updatedBy: item.assignee || item.updatedBy
   }
 }
@@ -472,6 +497,7 @@ function toDuplicateFormState(item) {
     id: "",
     createdAt: "",
     updatedAt: "",
+    updatedAtInput: "",
     version: 0
   }
 }
@@ -530,6 +556,7 @@ function buildReportDraft({
     // 各案件をMarkdownで出力
     ...(updatedItems.length > 0 ? updatedItems.map((item) => {
       const lines = []
+      lines.push(`- タイトル: ${item.title?.trim() || "-"}`)
       lines.push(`- 担当者: ${item.assignee || "-"}`)
       lines.push(`- カテゴリー: ${item.category || "-"}`)
 
@@ -594,22 +621,157 @@ function buildInvalidReportDraft(items, errorMessage) {
   }
 }
 
-function SortableTagList({ items, onRemove, onMove, showRemove = true }) {
+function SortableTagList({ items, onRemove, onMove, onReorder, showRemove = true }) {
+  const listRef = useRef(null)
+  const [dragState, setDragState] = useState({
+    sourceIndex: -1,
+    targetIndex: -1,
+    position: "before",
+    active: false,
+    pointerX: 0,
+    pointerY: 0
+  })
+
+  function resetDragState() {
+    setDragState({
+      sourceIndex: -1,
+      targetIndex: -1,
+      position: "before",
+      active: false,
+      pointerX: 0,
+      pointerY: 0
+    })
+  }
+
+  function handlePointerDown(event, index) {
+    event.preventDefault()
+    setDragState({
+      sourceIndex: index,
+      targetIndex: index,
+      position: "before",
+      active: true,
+      pointerX: event.clientX,
+      pointerY: event.clientY
+    })
+  }
+
+  useEffect(() => {
+    if (!dragState.active) {
+      return undefined
+    }
+
+    function handlePointerMove(event) {
+      const listElement = listRef.current
+
+      if (!listElement) {
+        return
+      }
+
+      const targetElement = document.elementFromPoint(event.clientX, event.clientY)?.closest("[data-sort-index]")
+
+      if (!(targetElement instanceof HTMLElement) || !listElement.contains(targetElement)) {
+        return
+      }
+
+      const nextIndex = Number(targetElement.dataset.sortIndex)
+
+      if (Number.isNaN(nextIndex)) {
+        return
+      }
+
+      const bounds = targetElement.getBoundingClientRect()
+      const nextPosition = event.clientY >= bounds.top + bounds.height / 2 ? "after" : "before"
+
+      setDragState((current) => {
+        if (!current.active) {
+          return current
+        }
+
+        if (current.targetIndex === nextIndex && current.position === nextPosition) {
+          return current
+        }
+
+        return {
+          ...current,
+          targetIndex: nextIndex,
+          position: nextPosition,
+          pointerX: event.clientX,
+          pointerY: event.clientY
+        }
+      })
+    }
+
+    function handlePointerUp() {
+      if (onReorder && dragState.sourceIndex >= 0 && dragState.targetIndex >= 0) {
+        const targetIndex = dragState.targetIndex + (dragState.position === "after" ? 1 : 0)
+        onReorder(dragState.sourceIndex, targetIndex)
+      }
+
+      resetDragState()
+    }
+
+    window.addEventListener("pointermove", handlePointerMove)
+    window.addEventListener("pointerup", handlePointerUp)
+
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove)
+      window.removeEventListener("pointerup", handlePointerUp)
+    }
+  }, [dragState.active, dragState.position, dragState.sourceIndex, dragState.targetIndex, onReorder])
+
+  function getDropClass(index) {
+    if (dragState.sourceIndex < 0 || dragState.targetIndex !== index || dragState.sourceIndex === index) {
+      return ""
+    }
+
+    return dragState.position === "after" ? "drop-after" : "drop-before"
+  }
+
   return (
-    <div className="settings-sortable-list">
-      {items.map((item, index) => (
-        <div className="settings-sortable-item" key={item}>
-          <strong>{item}</strong>
-          <div className="settings-item-actions">
-            <button type="button" className="secondary-button table-action" onClick={() => onMove(index, -1)} disabled={index === 0}>上へ</button>
-            <button type="button" className="secondary-button table-action" onClick={() => onMove(index, 1)} disabled={index === items.length - 1}>下へ</button>
-            {showRemove ? (
-              <button type="button" className="secondary-button table-action danger-action" onClick={() => onRemove(item)}>削除</button>
-            ) : null}
+    <>
+      <div className={`settings-sortable-list ${dragState.active ? "drag-active" : ""}`.trim()} ref={listRef}>
+        {items.map((item, index) => (
+          <div
+            className={`settings-sortable-item ${dragState.sourceIndex === index ? "dragging" : ""} ${getDropClass(index)}`.trim()}
+            key={item}
+            data-sort-index={index}
+          >
+            <div className="settings-item-main">
+              <button
+                type="button"
+                className="settings-drag-handle"
+                aria-label={`${item} をドラッグして並び替え`}
+                onPointerDown={(event) => handlePointerDown(event, index)}
+              >
+                ::
+              </button>
+              <strong>{item}</strong>
+            </div>
+            <div className="settings-item-actions">
+              <button type="button" className="secondary-button table-action" onClick={() => onMove(index, -1)} disabled={index === 0}>上へ</button>
+              <button type="button" className="secondary-button table-action" onClick={() => onMove(index, 1)} disabled={index === items.length - 1}>下へ</button>
+              {showRemove ? (
+                <button type="button" className="secondary-button table-action danger-action" onClick={() => onRemove(item)}>削除</button>
+              ) : null}
+            </div>
           </div>
+        ))}
+      </div>
+      {dragState.active && dragState.sourceIndex >= 0 ? (
+        <div
+          className="settings-drag-preview"
+          aria-hidden="true"
+          style={{
+            left: `${dragState.pointerX + 18}px`,
+            top: `${dragState.pointerY + 18}px`
+          }}
+        >
+          <span className="settings-drag-preview-handle">::</span>
+          <strong>{items[dragState.sourceIndex]}</strong>
+          <span className="settings-drag-preview-badge">移動中</span>
         </div>
-      ))}
-    </div>
+      ) : null}
+    </>
   )
 }
 
@@ -621,6 +783,7 @@ function OptionEditorSection({
   onAdd,
   onRemove,
   onMove,
+  onReorder,
   placeholder
 }) {
   return (
@@ -643,7 +806,7 @@ function OptionEditorSection({
         />
         <button type="button" className="secondary-button" onClick={onAdd}>追加</button>
       </div>
-      <p className="hint settings-sort-hint">上下ボタンで並び順を変更できます。</p>
+      <p className="hint settings-sort-hint">ドラッグアンドドロップ、または上下ボタンで並び順を変更できます。</p>
       <div className="settings-tag-list">
         {items.length === 0 ? <p className="hint">まだ登録がありません。</p> : null}
         {items.length > 0 ? (
@@ -651,6 +814,7 @@ function OptionEditorSection({
             items={items}
             onRemove={onRemove}
             onMove={onMove}
+            onReorder={onReorder}
           />
         ) : null}
       </div>
@@ -665,8 +829,10 @@ function SettingsModal({
   onAddOption,
   onRemoveOption,
   onMoveOption,
+  onReorderOption,
   onToggleColumn,
   onMoveColumn,
+  onReorderColumn,
   onClose,
   error,
   saving
@@ -698,6 +864,7 @@ function SettingsModal({
             onAdd={() => onAddOption("categoryOptions")}
             onRemove={(value) => onRemoveOption("categoryOptions", value)}
             onMove={(index, direction) => onMoveOption("categoryOptions", index, direction)}
+            onReorder={(fromIndex, toIndex) => onReorderOption("categoryOptions", fromIndex, toIndex)}
             placeholder="カテゴリー名を入力"
           />
           <OptionEditorSection
@@ -708,6 +875,7 @@ function SettingsModal({
             onAdd={() => onAddOption("assigneeOptions")}
             onRemove={(value) => onRemoveOption("assigneeOptions", value)}
             onMove={(index, direction) => onMoveOption("assigneeOptions", index, direction)}
+            onReorder={(fromIndex, toIndex) => onReorderOption("assigneeOptions", fromIndex, toIndex)}
             placeholder="担当者名を入力"
           />
           <OptionEditorSection
@@ -718,6 +886,7 @@ function SettingsModal({
             onAdd={() => onAddOption("statusOptions")}
             onRemove={(value) => onRemoveOption("statusOptions", value)}
             onMove={(index, direction) => onMoveOption("statusOptions", index, direction)}
+            onReorder={(fromIndex, toIndex) => onReorderOption("statusOptions", fromIndex, toIndex)}
             placeholder="ステータス名を入力"
           />
           <OptionEditorSection
@@ -728,6 +897,7 @@ function SettingsModal({
             onAdd={() => onAddOption("rankOptions")}
             onRemove={(value) => onRemoveOption("rankOptions", value)}
             onMove={(index, direction) => onMoveOption("rankOptions", index, direction)}
+            onReorder={(fromIndex, toIndex) => onReorderOption("rankOptions", fromIndex, toIndex)}
             placeholder="ランク名を入力"
           />
 
@@ -739,6 +909,7 @@ function SettingsModal({
             onAdd={() => onAddOption("leadSourceOptions")}
             onRemove={(value) => onRemoveOption("leadSourceOptions", value)}
             onMove={(index, direction) => onMoveOption("leadSourceOptions", index, direction)}
+            onReorder={(fromIndex, toIndex) => onReorderOption("leadSourceOptions", fromIndex, toIndex)}
             placeholder="リード元を入力"
           />
 
@@ -760,7 +931,7 @@ function SettingsModal({
                 </label>
               ))}
             </div>
-            <p className="hint settings-sort-hint">表示中の列は上下ボタンで順序変更できます。</p>
+            <p className="hint settings-sort-hint">表示中の列はドラッグアンドドロップ、または上下ボタンで順序変更できます。</p>
             <SortableTagList
               items={settingsDraft.visibleColumns.map((key) => tableColumnDefinitions.find((column) => column.key === key)?.label || key)}
               onRemove={(label) => {
@@ -770,6 +941,7 @@ function SettingsModal({
                 }
               }}
               onMove={onMoveColumn}
+              onReorder={onReorderColumn}
               showRemove={false}
             />
             <p className="hint">最低1列は選択してください。</p>
@@ -854,6 +1026,7 @@ function ProgressForm({
   const assigneeSelectOptions = withCurrentOption(assigneeOptions, form.assignee)
   const statusSelectOptions = withCurrentOption(statusOptions, form.status)
   const rankSelectOptions = withCurrentOption(rankOptions, form.rank)
+  const isEditMode = Boolean(form.id)
 
   const leadSourceSelectOptions = withCurrentOption(
     (leadSourceOptions && leadSourceOptions.length) ? leadSourceOptions : defaultLeadSourceOptions,
@@ -864,6 +1037,10 @@ function ProgressForm({
 
   return (
     <form className="detail-form" onSubmit={onSubmit}>
+      <label>
+        <span>タイトル</span>
+        <input value={form.title} onChange={(event) => onChange({ ...form, title: event.target.value })} />
+      </label>
       <label>
         <span>対象KPI番号</span>
         <select value={form.kpiNumber} onChange={(event) => onChange({ ...form, kpiNumber: event.target.value })}>
@@ -961,7 +1138,7 @@ function ProgressForm({
         <input value={form.internalDepartments} onChange={(event) => onChange({ ...form, internalDepartments: event.target.value })} />
       </label>
       <label>
-        <span>顧客名</span>
+        <span>顧客名 / Project 名</span>
         <input value={form.customer} onChange={(event) => onChange({ ...form, customer: event.target.value })} />
       </label>
       <label className="full-width">
@@ -976,16 +1153,17 @@ function ProgressForm({
         <span>報告メモ</span>
         <textarea value={form.reportMemo} onChange={(event) => onChange({ ...form, reportMemo: event.target.value })} rows="3" />
       </label>
-      <div className="form-meta">
-        <div>
-          <span>登録日</span>
-          <strong>{formatDate(form.createdAt)}</strong>
-        </div>
-        <div>
+      {isEditMode ? (
+        <label>
           <span>更新日</span>
-          <strong>{formatDate(form.updatedAt)}</strong>
-        </div>
-      </div>
+          <input
+            type="date"
+            value={form.updatedAtInput || ""}
+            onChange={(event) => onChange({ ...form, updatedAtInput: event.target.value })}
+            required
+          />
+        </label>
+      ) : null}
       <div className="form-actions">
         {onCancel ? <button type="button" className="secondary-button" onClick={onCancel} disabled={saving}>{cancelLabel}</button> : null}
         <button type="submit" disabled={saving}>{submitLabel}</button>
@@ -1646,6 +1824,22 @@ export default function App() {
     void persistSettings(nextDraft)
   }
 
+  function handleReorderOption(field, fromIndex, toIndex) {
+    if (!settingsDraft) return
+    const nextItems = insertListItem(settingsDraft[field], fromIndex, toIndex)
+
+    if (nextItems === settingsDraft[field]) {
+      return
+    }
+
+    const nextDraft = {
+      ...settingsDraft,
+      [field]: nextItems
+    }
+    setSettingsDraft(nextDraft)
+    void persistSettings(nextDraft)
+  }
+
   function handleToggleColumn(columnKey) {
     if (!settingsDraft) return
     const isActive = settingsDraft.visibleColumns.includes(columnKey)
@@ -1663,6 +1857,22 @@ export default function App() {
     const nextDraft = {
       ...settingsDraft,
       visibleColumns: reorderList(settingsDraft.visibleColumns, index, index + direction)
+    }
+    setSettingsDraft(nextDraft)
+    void persistSettings(nextDraft)
+  }
+
+  function handleReorderColumn(fromIndex, toIndex) {
+    if (!settingsDraft) return
+    const nextColumns = insertListItem(settingsDraft.visibleColumns, fromIndex, toIndex)
+
+    if (nextColumns === settingsDraft.visibleColumns) {
+      return
+    }
+
+    const nextDraft = {
+      ...settingsDraft,
+      visibleColumns: nextColumns
     }
     setSettingsDraft(nextDraft)
     void persistSettings(nextDraft)
@@ -1739,7 +1949,7 @@ export default function App() {
           })
 
       setSelectedId(savedItem.id)
-      setForm(savedItem)
+          setForm(toFormState(savedItem))
       setPanelMode("detail")
       setIsDrawerOpen(false)
       setMessage(selectedId ? "進捗を更新しました。" : "進捗を登録しました。")
@@ -1791,7 +2001,7 @@ export default function App() {
       })
 
       setSelectedId(savedItem.id)
-      setForm(savedItem)
+      setForm(toFormState(savedItem))
       setDuplicateForm(null)
       setDuplicateSourceLabel("")
       setMessage("進捗を複製して登録しました。")
@@ -1842,6 +2052,8 @@ export default function App() {
           </p>
         </div>
       </header>
+
+      <div className="app-version">Version v0.4</div>
 
       {startupState ? (
         <StartupWizard
@@ -2149,7 +2361,8 @@ export default function App() {
                 <div className="detail-hero">
                   <div>
                     <p className="eyebrow">{selectedItem.category || "未設定カテゴリ"}</p>
-                    <h3>{formatKpiDisplay(selectedItem.kpiNumber)} / {selectedItem.assignee}</h3>
+                    <h3>{selectedItem.title?.trim() || `${formatKpiDisplay(selectedItem.kpiNumber)} / ${selectedItem.assignee}`}</h3>
+                    <p className="hint">{formatKpiDisplay(selectedItem.kpiNumber)} / {selectedItem.assignee}</p>
                   </div>
                   <div className="detail-hero-actions">
                     <span className="pill">{selectedItem.status}</span>
@@ -2159,12 +2372,12 @@ export default function App() {
 
                 <div className="detail-grid">
                   <article className="detail-block">
-                    <span>顧客名</span>
-                    <strong>{selectedItem.customer || "-"}</strong>
+                    <span>タイトル</span>
+                    <strong>{selectedItem.title || "-"}</strong>
                   </article>
                   <article className="detail-block">
-                    <span>登録日</span>
-                    <strong>{formatDate(selectedItem.createdAt)}</strong>
+                    <span>顧客名 / Project 名</span>
+                    <strong>{truncateText(selectedItem.customer || "-")}</strong>
                   </article>
                   <article className="detail-block">
                     <span>更新日</span>
@@ -2246,8 +2459,10 @@ export default function App() {
           onAddOption={handleAddOption}
           onRemoveOption={handleRemoveOption}
           onMoveOption={handleMoveOption}
+          onReorderOption={handleReorderOption}
           onToggleColumn={handleToggleColumn}
           onMoveColumn={handleMoveColumn}
+          onReorderColumn={handleReorderColumn}
           onClose={handleCloseSettings}
           error={settingsError}
           saving={settingsSaving}
