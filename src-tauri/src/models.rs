@@ -41,6 +41,17 @@ fn default_visible_columns() -> Vec<String> {
     ]
 }
 
+fn default_lead_source_options() -> Vec<String> {
+    vec![
+        "TDW".to_string(),
+        "主催・共催イベント".to_string(),
+        "オフラインイベント".to_string(),
+        "アウトバウンド".to_string(),
+        "社内".to_string(),
+        "個別ネットワーキング".to_string(),
+    ]
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProgressItem {
@@ -130,6 +141,8 @@ pub struct AppSettings {
     pub rank_options: Vec<String>,
     #[serde(default = "default_visible_columns")]
     pub visible_columns: Vec<String>,
+    #[serde(default = "default_lead_source_options")]
+    pub lead_source_options: Vec<String>,
 }
 
 impl Default for AppSettings {
@@ -141,6 +154,7 @@ impl Default for AppSettings {
             status_options: default_status_options(),
             rank_options: default_rank_options(),
             visible_columns: default_visible_columns(),
+            lead_source_options: default_lead_source_options(),
         }
     }
 }

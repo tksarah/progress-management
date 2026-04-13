@@ -58,6 +58,7 @@ struct WorkbookSettingsData {
     status_options: Vec<String>,
     rank_options: Vec<String>,
     visible_columns: Vec<String>,
+    lead_source_options: Vec<String>,
 }
 
 fn workbook_settings_from_app_settings(settings: &AppSettings) -> WorkbookSettingsData {
@@ -67,6 +68,7 @@ fn workbook_settings_from_app_settings(settings: &AppSettings) -> WorkbookSettin
         status_options: settings.status_options.clone(),
         rank_options: settings.rank_options.clone(),
         visible_columns: settings.visible_columns.clone(),
+        lead_source_options: settings.lead_source_options.clone(),
     }
 }
 
@@ -78,6 +80,7 @@ fn app_settings_from_workbook_settings(data: WorkbookSettingsData) -> AppSetting
         status_options: data.status_options,
         rank_options: data.rank_options,
         visible_columns: data.visible_columns,
+        lead_source_options: data.lead_source_options,
     }
 }
 
@@ -145,11 +148,22 @@ fn normalize_lead_source(category: &str, lead_source: String) -> String {
     }
 }
 
-fn validate_lead_source(category: &str, lead_source: &str) -> Result<(), String> {
+fn validate_lead_source(category: &str, lead_source: &str, settings: &AppSettings) -> Result<(), String> {
     let trimmed = lead_source.trim();
 
     if category != "営業" || trimmed.is_empty() {
         return Ok(());
+    }
+
+    // If settings provide lead source options, prefer them; otherwise fall back to the legacy list
+    let configured = &settings.lead_source_options;
+
+    if !configured.is_empty() {
+        if configured.iter().any(|v| v == trimmed) {
+            return Ok(());
+        } else {
+            return Err("リード元 は設定済みの候補から選択してください。".to_string());
+        }
     }
 
     let allowed = [
@@ -204,6 +218,10 @@ fn write_settings_sheet(workbook: &mut Workbook, settings: &AppSettings) -> Resu
         (
             "visibleColumns",
             serialize_setting_value(&workbook_settings.visible_columns)?,
+        ),
+        (
+            "leadSourceOptions",
+            serialize_setting_value(&workbook_settings.lead_source_options)?,
         ),
     ];
 
@@ -343,6 +361,11 @@ pub fn load_embedded_settings(path: &Path) -> Result<Option<AppSettings>, String
                 .get("visibleColumns")
                 .ok_or_else(|| "設定シートに visibleColumns がありません。".to_string())?,
         )?,
+        lead_source_options: if let Some(raw) = values.get("leadSourceOptions") {
+            deserialize_setting_value(raw)?
+        } else {
+            Vec::new()
+        },
     };
 
     Ok(Some(app_settings_from_workbook_settings(data)))
@@ -501,7 +524,7 @@ fn validate_payload(payload: &ProgressPayload, settings: &AppSettings) -> Result
         normalize_deal_size(&payload.deal_size)?;
     }
 
-    validate_lead_source(&payload.category, &payload.lead_source)?;
+    validate_lead_source(&payload.category, &payload.lead_source, settings)?;
 
     Ok(())
 }

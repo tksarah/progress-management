@@ -47,6 +47,8 @@ const rankChartPalette = [
   "#c2255c"
 ]
 
+const defaultLeadSourceOptions = ["TDW", "主催・共催イベント", "オフラインイベント", "アウトバウンド", "社内", "個別ネットワーキング"]
+
 const tableColumnDefinitions = [
   { key: "status", label: "ステータス", render: (item) => item.status || "-" },
   { key: "kpiNumber", label: "KPI", render: (item) => item.kpiNumber || "-" },
@@ -70,7 +72,8 @@ const defaultAppSettings = {
   assigneeOptions: defaultAssigneeOptions,
   statusOptions: defaultStatusOptions,
   rankOptions: defaultRankOptions,
-  visibleColumns: defaultVisibleColumns
+  visibleColumns: defaultVisibleColumns,
+  leadSourceOptions: defaultLeadSourceOptions
 }
 
 function reorderList(items, fromIndex, toIndex) {
@@ -102,6 +105,7 @@ function normalizeAppSettings(settings) {
     assigneeOptions: sanitizeOptionList(settings?.assigneeOptions || defaultAssigneeOptions),
     statusOptions: sanitizeOptionList(settings?.statusOptions || defaultStatusOptions),
     rankOptions: sanitizeOptionList(settings?.rankOptions || defaultRankOptions),
+    leadSourceOptions: sanitizeOptionList((settings?.leadSourceOptions && settings.leadSourceOptions.length) ? settings.leadSourceOptions : defaultLeadSourceOptions),
     visibleColumns: normalizeVisibleColumns(settings?.visibleColumns || defaultVisibleColumns)
   }
 }
@@ -727,6 +731,17 @@ function SettingsModal({
             placeholder="ランク名を入力"
           />
 
+          <OptionEditorSection
+            title="リード元"
+            items={settingsDraft.leadSourceOptions}
+            inputValue={optionDrafts.leadSourceOptions}
+            onInputChange={(value) => onOptionDraftChange("leadSourceOptions", value)}
+            onAdd={() => onAddOption("leadSourceOptions")}
+            onRemove={(value) => onRemoveOption("leadSourceOptions", value)}
+            onMove={(index, direction) => onMoveOption("leadSourceOptions", index, direction)}
+            placeholder="リード元を入力"
+          />
+
           <section className="settings-editor-section settings-column-section">
             <div className="settings-editor-head">
               <h3>進捗一覧の列</h3>
@@ -833,21 +848,17 @@ function ProgressForm({
   assigneeOptions,
   statusOptions,
   rankOptions
+  ,leadSourceOptions
 }) {
   const categorySelectOptions = withCurrentOption(categoryOptions, form.category)
   const assigneeSelectOptions = withCurrentOption(assigneeOptions, form.assignee)
   const statusSelectOptions = withCurrentOption(statusOptions, form.status)
   const rankSelectOptions = withCurrentOption(rankOptions, form.rank)
 
-  const leadSourceOptions = [
-    "TDW",
-    "主催・共催イベント",
-    "オフラインイベント",
-    "アウトバウンド",
-    "社内",
-    "個別ネットワーキング"
-  ]
-  const leadSourceSelectOptions = withCurrentOption(leadSourceOptions, form.leadSource)
+  const leadSourceSelectOptions = withCurrentOption(
+    (leadSourceOptions && leadSourceOptions.length) ? leadSourceOptions : defaultLeadSourceOptions,
+    form.leadSource
+  )
 
   const salesContentTemplate = "* 概要：\n* Budget / Authority / Need / Timeline：\n* コンペリングイベント：\n"
 
@@ -1000,7 +1011,8 @@ export default function App() {
     categoryOptions: "",
     assigneeOptions: "",
     statusOptions: "",
-    rankOptions: ""
+    rankOptions: "",
+    leadSourceOptions: ""
   })
   const [settingsError, setSettingsError] = useState("")
   const [settingsSaving, setSettingsSaving] = useState(false)
@@ -1319,7 +1331,8 @@ export default function App() {
       categoryOptions: "",
       assigneeOptions: "",
       statusOptions: "",
-      rankOptions: ""
+      rankOptions: "",
+      leadSourceOptions: ""
     })
     setSettingsError("")
   }
@@ -2219,6 +2232,7 @@ export default function App() {
               assigneeOptions={appSettings.assigneeOptions}
               statusOptions={appSettings.statusOptions}
               rankOptions={appSettings.rankOptions}
+              leadSourceOptions={appSettings.leadSourceOptions}
             />
           )}
         </aside>
@@ -2269,6 +2283,7 @@ export default function App() {
               assigneeOptions={appSettings.assigneeOptions}
               statusOptions={appSettings.statusOptions}
               rankOptions={appSettings.rankOptions}
+              leadSourceOptions={appSettings.leadSourceOptions}
             />
             {duplicateError ? <p className="message error compact-message">{duplicateError}</p> : null}
           </section>

@@ -99,6 +99,7 @@ pub fn normalize_settings(mut settings: AppSettings) -> Result<AppSettings, Stri
     settings.assignee_options = normalize_list(settings.assignee_options);
     settings.status_options = normalize_list(settings.status_options);
     settings.rank_options = normalize_list(settings.rank_options);
+    settings.lead_source_options = normalize_list(settings.lead_source_options);
     // Migrate legacy single 'X' rank to new options if the user hasn't already customized
     let current_ranks = settings.rank_options.clone();
     let has_new_ranks = current_ranks.iter().any(|v| v == "X1" || v == "X2" || v == "1");
