@@ -6,7 +6,11 @@ fn default_category_options() -> Vec<String> {
 }
 
 fn default_assignee_options() -> Vec<String> {
-    vec!["山﨑".to_string(), "倉持".to_string(), "西田".to_string()]
+    vec![
+        "ユーザー１".to_string(),
+        "ユーザー２".to_string(),
+        "ユーザー３".to_string(),
+    ]
 }
 
 fn default_status_options() -> Vec<String> {

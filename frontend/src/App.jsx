@@ -26,7 +26,7 @@ const emptyForm = {
 }
 
 const defaultCategoryOptions = ["営業", "マーケティング"]
-const defaultAssigneeOptions = ["山﨑", "倉持", "西田"]
+const defaultAssigneeOptions = ["ユーザー１", "ユーザー２", "ユーザー３"]
 const defaultStatusOptions = ["進捗中", "計画中", "クローズ", "保留"]
 const defaultRankOptions = ["A", "B", "C", "D", "X1", "X2", "1"]
 const kpiOptions = ["①", "②", "③", "④", "⑤"]
@@ -2053,7 +2053,7 @@ export default function App() {
         </div>
       </header>
 
-      <div className="app-version">Version v0.4</div>
+      <div className="app-version">Version v0.4.1</div>
 
       {startupState ? (
         <StartupWizard
