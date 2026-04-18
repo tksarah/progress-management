@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { invoke } from "@tauri-apps/api/core"
 import { open, save } from "@tauri-apps/plugin-dialog"
+import { buildPowerPointArrayBuffer, buildPowerPointFileName, buildPowerPointReportData } from "./reportPowerPoint"
 
 const pageSize = 10
 
@@ -352,6 +353,14 @@ function parseDateInputValue(value) {
 
 function formatPeriodLabel(start, end) {
   return `${start.toLocaleDateString("ja-JP")} - ${end.toLocaleDateString("ja-JP")}`
+}
+
+function normalizePresentationPath(path) {
+  if (!path) {
+    return path
+  }
+
+  return path.toLowerCase().endsWith(".pptx") ? path : `${path}.pptx`
 }
 
 function resolveReportRange({ preset, startDateInput, endDateInput }) {
@@ -1208,6 +1217,7 @@ export default function App() {
   const [reportEndDate, setReportEndDate] = useState(defaultReportEndDate)
   const [reportText, setReportText] = useState("")
   const [reportNotice, setReportNotice] = useState("")
+  const [reportExporting, setReportExporting] = useState(false)
   const [currentPage, setCurrentPage] = useState(1)
   const [duplicateForm, setDuplicateForm] = useState(null)
   const [duplicateSourceLabel, setDuplicateSourceLabel] = useState("")
@@ -2027,6 +2037,59 @@ export default function App() {
     }
   }
 
+  async function handleDownloadPowerPoint() {
+    if (!reportRange.isValid) {
+      setReportNotice(reportRange.errorMessage)
+      return
+    }
+
+    setReportExporting(true)
+    setReportNotice("")
+    setError("")
+    setMessage("")
+
+    try {
+      const reportData = buildPowerPointReportData({
+        items: filteredItems,
+        range: reportRange,
+        metrics: reportPreview.metrics,
+        filters: {
+          statusFilter,
+          kpiFilter,
+          categoryFilter,
+          query
+        },
+        categoryOrder: appSettings.categoryOptions,
+        rankOrder: appSettings.rankOptions
+      })
+      const selected = await save({
+        filters: [
+          {
+            name: "PowerPoint Presentation",
+            extensions: ["pptx"]
+          }
+        ],
+        defaultPath: normalizePresentationPath(buildPowerPointFileName(reportData))
+      })
+
+      if (typeof selected !== "string") {
+        return
+      }
+
+      const buffer = await buildPowerPointArrayBuffer(reportData)
+      const bytes = Array.from(new Uint8Array(buffer))
+      const savedPath = await call("save_powerpoint_report", {
+        exportFilePath: normalizePresentationPath(selected),
+        bytes
+      })
+      setReportNotice(`PowerPoint を保存しました: ${savedPath}`)
+    } catch (downloadError) {
+      setError(downloadError.message)
+    } finally {
+      setReportExporting(false)
+    }
+  }
+
   // 履歴保存は削除されています
 
   function handleReportPresetChange(event) {
@@ -2053,7 +2116,7 @@ export default function App() {
         </div>
       </header>
 
-      <div className="app-version">Version v0.4.1</div>
+      <div className="app-version">Version v0.5</div>
 
       {startupState ? (
         <StartupWizard
@@ -2315,7 +2378,8 @@ export default function App() {
                 {/* 履歴保存・差分機能は削除されています */}
                 <div className="report-actions">
                   <button type="button" className="secondary-button" onClick={handleGenerateReport}>再生成</button>
-                  <button type="button" onClick={handleCopyReport}>コピー</button>
+                  <button type="button" className="secondary-button" onClick={handleDownloadPowerPoint} disabled={reportExporting || saving}>PowerPoint</button>
+                  <button type="button" onClick={handleCopyReport} disabled={reportExporting}>コピー</button>
                 </div>
               </section>
 

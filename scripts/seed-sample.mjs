@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import ExcelJS from '../backend/node_modules/exceljs/excel.js';
+import ExcelJS from 'exceljs';
 
 const SHEET_NAME = 'Progress';
 const HEADERS = [

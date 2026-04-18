@@ -171,6 +171,28 @@ fn export_current_excel(export_file_path: String) -> Result<String, String> {
     Ok(export_path.to_string_lossy().to_string())
 }
 
+#[tauri::command]
+fn save_powerpoint_report(export_file_path: String, bytes: Vec<u8>) -> Result<String, String> {
+    let trimmed = export_file_path.trim();
+
+    if trimmed.is_empty() {
+        return Err("exportFilePath は必須です。".to_string());
+    }
+
+    if bytes.is_empty() {
+        return Err("保存する PowerPoint データが空です。".to_string());
+    }
+
+    let export_path = PathBuf::from(trimmed);
+
+    if let Some(parent) = export_path.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+
+    fs::write(&export_path, bytes).map_err(|error| error.to_string())?;
+    Ok(export_path.to_string_lossy().to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -184,7 +206,8 @@ pub fn run() {
             create_progress,
             update_progress,
             delete_progress,
-            export_current_excel
+            export_current_excel,
+            save_powerpoint_report
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,6 +1,8 @@
 
  # 進捗管理 PoC
 
+ バージョン: v0.5
+
  ローカルで動作する Tauri ベースのデスクトップアプリ（PoC）。フロントエンドは React + Vite、ネイティブ処理は Rust で実装され、ローカルの Excel (`.xlsx`) をデータ保存先として利用します。
 
  **主要技術**: React, Vite, Tauri, Rust
