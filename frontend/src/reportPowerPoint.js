@@ -293,92 +293,280 @@ export function buildPowerPointReportData({ items, range, metrics, filters, cate
   }
 }
 
-function addHeaderBand(slide, subtitle) {
+const FONT_JA = "Meiryo"
+const FONT_LATIN = "Segoe UI"
+
+const FRAME = {
+  width: 13.33,
+  marginX: 0.72,
+  headerTop: 0.22,
+  headerTitleY: 0.26,
+  headerSubtitleY: 0.54,
+  headerDividerY: 0.94,
+  footerDividerY: 6.78,
+  footerTextY: 6.92,
+  footerPageX: 11.12,
+  footerPageW: 1.46
+}
+
+const DETAIL_ITEMS_PER_PAGE = 2
+const TOC_ENTRIES_PER_PAGE = 8
+
+function isAsciiCharacter(character) {
+  return character.charCodeAt(0) <= 0x7f
+}
+
+function buildMixedFontRuns(text) {
+  const value = String(text ?? "")
+
+  if (value.length === 0) {
+    return [{ text: "", options: { fontFace: FONT_JA } }]
+  }
+
+  const runs = []
+  let currentKind = null
+  let buffer = ""
+
+  for (const character of value) {
+    const kind = isAsciiCharacter(character) ? "latin" : "ja"
+
+    if (currentKind === null) {
+      currentKind = kind
+      buffer = character
+      continue
+    }
+
+    if (kind === currentKind) {
+      buffer += character
+      continue
+    }
+
+    runs.push({
+      text: buffer,
+      options: { fontFace: currentKind === "latin" ? FONT_LATIN : FONT_JA }
+    })
+
+    buffer = character
+    currentKind = kind
+  }
+
+  if (buffer.length > 0) {
+    runs.push({
+      text: buffer,
+      options: { fontFace: currentKind === "latin" ? FONT_LATIN : FONT_JA }
+    })
+  }
+
+  return runs
+}
+
+function addText(slide, text, options = {}) {
+  if (Array.isArray(text)) {
+    slide.addText(text, options)
+    return
+  }
+
+  const value = String(text ?? "")
+  const textOptions = { ...options }
+  delete textOptions.fontFace
+
+  const runs = buildMixedFontRuns(value)
+
+  if (runs.length === 1) {
+    slide.addText(runs[0].text, {
+      ...textOptions,
+      fontFace: runs[0].options.fontFace
+    })
+    return
+  }
+
+  slide.addText(runs, textOptions)
+}
+
+function formatPageNumber(pageNumber, totalPages) {
+  const width = Math.max(String(totalPages).length, 2)
+  return `${String(pageNumber).padStart(width, "0")} / ${String(totalPages).padStart(width, "0")}`
+}
+
+function addPanel(slide, options) {
+  const accentColor = options.accentColor || BRAND.blue
+
+  slide.addShape("roundRect", {
+    x: options.x,
+    y: options.y,
+    w: options.w,
+    h: options.h,
+    rectRadius: options.rectRadius ?? 0.08,
+    line: { color: options.borderColor || BRAND.border, pt: 1 },
+    fill: { color: options.fillColor || "FFFFFF" }
+  })
+
+  slide.addShape("rect", {
+    x: options.x,
+    y: options.y,
+    w: 0.12,
+    h: options.h,
+    line: { color: accentColor, transparency: 100 },
+    fill: { color: accentColor }
+  })
+}
+
+function applySlideBackground(slide, isCover = false) {
+  slide.background = { color: BRAND.softAlt }
+
   slide.addShape("rect", {
     x: 0,
     y: 0,
-    w: 13.33,
-    h: 0.5,
+    w: FRAME.width,
+    h: 0.12,
     line: { color: BRAND.navy, transparency: 100 },
     fill: { color: BRAND.navy }
   })
 
-  if (subtitle) {
-    slide.addText(subtitle, {
-      x: 0.75,
-      y: 0.62,
-      w: 4.4,
-      h: 0.24,
-      fontFace: "Meiryo",
-      fontSize: 11,
-      color: BRAND.blue,
-      bold: true,
-      margin: 0
+  slide.addShape("rect", {
+    x: 0,
+    y: 7.42,
+    w: FRAME.width,
+    h: 0.08,
+    line: { color: BRAND.cyan, transparency: 100 },
+    fill: { color: BRAND.cyan }
+  })
+
+  if (isCover) {
+    slide.addShape("ellipse", {
+      x: 10.1,
+      y: 0.52,
+      w: 3.1,
+      h: 3.1,
+      line: { color: BRAND.cyan, transparency: 100 },
+      fill: { color: BRAND.cyan, transparency: 84 }
+    })
+
+    slide.addShape("ellipse", {
+      x: -0.7,
+      y: 5.65,
+      w: 2.1,
+      h: 2.1,
+      line: { color: BRAND.blue, transparency: 100 },
+      fill: { color: BRAND.blue, transparency: 88 }
     })
   }
 }
 
-function addSlideTitle(slide, title, subtitle) {
-  addHeaderBand(slide, subtitle)
+function renderSlideFrame(slide, { title, subtitle, meta, footerLeft, pageNumber, totalPages, isCover = false }) {
+  applySlideBackground(slide, isCover)
 
-  slide.addText(title, {
-    x: 0.75,
-    y: subtitle ? 0.92 : 0.78,
-    w: 8.8,
-    h: 0.48,
-    fontFace: "Meiryo",
+  slide.addShape("line", {
+    x: FRAME.marginX,
+    y: FRAME.headerDividerY,
+    w: FRAME.width - (FRAME.marginX * 2),
+    h: 0,
+    line: { color: BRAND.border, pt: 1 }
+  })
+
+  slide.addShape("line", {
+    x: FRAME.marginX,
+    y: FRAME.footerDividerY,
+    w: FRAME.width - (FRAME.marginX * 2),
+    h: 0,
+    line: { color: BRAND.border, pt: 1 }
+  })
+
+  slide.addShape("roundRect", {
+    x: FRAME.marginX,
+    y: FRAME.headerTop,
+    w: 0.15,
+    h: 0.54,
+    rectRadius: 0.04,
+    line: { color: BRAND.navy, transparency: 100 },
+    fill: { color: BRAND.navy }
+  })
+
+  addText(slide, title, {
+    x: FRAME.marginX + 0.3,
+    y: FRAME.headerTitleY,
+    w: 8.55,
+    h: 0.34,
     fontSize: 24,
     bold: true,
     color: BRAND.ink,
-    margin: 0
+    margin: 0,
+    fit: "shrink"
   })
-}
 
-function addFooter(slide, text) {
-  slide.addText(text, {
-    x: 0.75,
-    y: 7.0,
-    w: 11.83,
-    h: 0.2,
-    fontFace: "Meiryo",
-    fontSize: 9,
-    color: BRAND.muted,
-    align: "right",
-    margin: 0
-  })
+  if (meta) {
+    addText(slide, meta, {
+      x: 9.55,
+      y: 0.3,
+      w: 2.98,
+      h: 0.18,
+      fontSize: 10,
+      color: BRAND.blue,
+      align: "right",
+      margin: 0,
+      fit: "shrink"
+    })
+  }
+
+  if (footerLeft) {
+    addText(slide, footerLeft, {
+      x: FRAME.marginX,
+      y: FRAME.footerTextY,
+      w: 9.5,
+      h: 0.16,
+      fontSize: 8.5,
+      color: BRAND.muted,
+      margin: 0,
+      fit: "shrink"
+    })
+  }
+
+  if (pageNumber) {
+    addText(slide, String(pageNumber), {
+      x: FRAME.footerPageX,
+      y: 6.93,
+      w: FRAME.footerPageW,
+      h: 0.12,
+      fontSize: 10,
+      bold: true,
+      color: BRAND.muted,
+      align: "right",
+      margin: 0,
+      fit: "shrink"
+    })
+  }
 }
 
 function addMetricCard(slide, options) {
   const width = options.w || 2.8
   const height = options.h || 1.2
 
-  slide.addShape("roundRect", {
+  addPanel(slide, {
     x: options.x,
     y: options.y,
     w: width,
     h: height,
-    rectRadius: 0.08,
-    line: { color: BRAND.border, pt: 1 },
-    fill: { color: options.fillColor || "FFFFFF" }
+    fillColor: options.fillColor || "FFFFFF",
+    borderColor: options.borderColor || BRAND.border,
+    accentColor: options.accentColor || options.valueColor || BRAND.blue
   })
 
-  slide.addText(options.label, {
-    x: options.x + 0.2,
-    y: options.y + 0.16,
-    w: width - 0.4,
+  addText(slide, options.label, {
+    x: options.x + 0.22,
+    y: options.y + 0.14,
+    w: width - 0.44,
     h: 0.18,
-    fontFace: "Meiryo",
     fontSize: options.labelFontSize || 10,
     color: BRAND.muted,
-    margin: 0
+    margin: 0,
+    fit: "shrink"
   })
 
-  slide.addText(String(options.value), {
-    x: options.x + 0.2,
-    y: options.y + 0.42,
-    w: width - 0.4,
-    h: 0.4,
-    fontFace: "Meiryo",
+  addText(slide, String(options.value), {
+    x: options.x + 0.22,
+    y: options.y + 0.4,
+    w: width - 0.44,
+    h: 0.44,
     fontSize: options.valueFontSize || 24,
     bold: true,
     color: options.valueColor || BRAND.ink,
@@ -387,40 +575,40 @@ function addMetricCard(slide, options) {
   })
 }
 
-function addBulletList(slide, title, lines, x, y, w, h) {
-  slide.addShape("roundRect", {
+function addBulletList(slide, title, lines, x, y, w, h, accentColor = BRAND.blue) {
+  addPanel(slide, {
     x,
     y,
     w,
     h,
     rectRadius: 0.08,
-    line: { color: BRAND.border, pt: 1 },
-    fill: { color: BRAND.softAlt }
+    fillColor: BRAND.softAlt,
+    accentColor
   })
 
-  slide.addText(title, {
-    x: x + 0.18,
+  addText(slide, title, {
+    x: x + 0.22,
     y: y + 0.14,
-    w: w - 0.36,
+    w: w - 0.44,
     h: 0.2,
-    fontFace: "Meiryo",
     fontSize: 12,
     bold: true,
     color: BRAND.ink,
-    margin: 0
+    margin: 0,
+    fit: "shrink"
   })
 
-  slide.addText(lines.length > 0 ? lines.join("\n") : "対象なし", {
-    x: x + 0.18,
-    y: y + 0.45,
-    w: w - 0.36,
-    h: h - 0.58,
-    fontFace: "Meiryo",
-    fontSize: 11,
+  addText(slide, lines.length > 0 ? lines.join("\n") : "対象なし", {
+    x: x + 0.22,
+    y: y + 0.42,
+    w: w - 0.44,
+    h: h - 0.5,
+    fontSize: 10.5,
     color: BRAND.ink,
     valign: "top",
     breakLine: false,
-    margin: 0
+    margin: 0,
+    fit: "shrink"
   })
 }
 
@@ -444,24 +632,23 @@ function addLegendCard(slide, options) {
     fill: { color: options.color }
   })
 
-  slide.addText(options.label, {
+  addText(slide, options.label, {
     x: options.x + 0.4,
     y: options.y + 0.11,
     w: options.w - 0.52,
     h: 0.18,
-    fontFace: "Meiryo",
     fontSize: 10,
     color: BRAND.ink,
     bold: true,
-    margin: 0
+    margin: 0,
+    fit: "shrink"
   })
 
-  slide.addText(options.valueLabel, {
+  addText(slide, options.valueLabel, {
     x: options.x + 0.4,
     y: options.y + 0.42,
     w: options.w - 0.52,
     h: 0.28,
-    fontFace: "Meiryo",
     fontSize: 16,
     color: BRAND.ink,
     margin: 0,
@@ -469,56 +656,56 @@ function addLegendCard(slide, options) {
   })
 
   if (options.caption) {
-    slide.addText(options.caption, {
+    addText(slide, options.caption, {
       x: options.x + 0.4,
-      y: options.y + 0.84,
+      y: options.y + 0.78,
       w: options.w - 0.52,
       h: 0.18,
-      fontFace: "Meiryo",
       fontSize: 9,
       color: BRAND.muted,
-      margin: 0
+      margin: 0,
+      fit: "shrink"
     })
   }
 }
 
 function addDonutChartPanel(slide, options) {
-  slide.addShape("roundRect", {
+  addPanel(slide, {
     x: options.x,
     y: options.y,
     w: options.w,
     h: options.h,
     rectRadius: 0.08,
-    line: { color: BRAND.border, pt: 1 },
-    fill: { color: BRAND.softAlt }
+    fillColor: BRAND.softAlt,
+    accentColor: options.rows[0]?.color || BRAND.blue
   })
 
-  slide.addText(options.title, {
+  addText(slide, options.title, {
     x: options.x + 0.22,
-    y: options.y + 0.18,
+    y: options.y + 0.16,
     w: 2.8,
     h: 0.22,
-    fontFace: "Meiryo",
     fontSize: 12,
     bold: true,
     color: BRAND.ink,
-    margin: 0
+    margin: 0,
+    fit: "shrink"
   })
 
-  slide.addText(options.subtitle, {
+  addText(slide, options.subtitle, {
     x: options.x + 0.22,
-    y: options.y + 0.46,
+    y: options.y + 0.42,
     w: 3.2,
     h: 0.18,
-    fontFace: "Meiryo",
     fontSize: 9,
     color: BRAND.muted,
-    margin: 0
+    margin: 0,
+    fit: "shrink"
   })
 
   if (options.rows.length > 0) {
     const chartX = options.x + 0.12
-    const chartY = options.y + 0.78
+    const chartY = options.y + 0.74
     const chartSize = 2.3
 
     slide.addChart("doughnut", [{
@@ -542,38 +729,37 @@ function addDonutChartPanel(slide, options) {
       layout: { x: 0, y: 0, w: 1, h: 1 }
     })
   } else {
-    slide.addText("対象データなし", {
+    addText(slide, "対象データなし", {
       x: options.x + 0.3,
-      y: options.y + 1.85,
+      y: options.y + 1.86,
       w: 2.4,
       h: 0.2,
-      fontFace: "Meiryo",
       fontSize: 11,
       color: BRAND.muted,
       align: "center",
-      margin: 0
+      margin: 0,
+      fit: "shrink"
     })
   }
 
-  slide.addText(options.centerTitle, {
+  addText(slide, options.centerTitle, {
     x: options.x + 0.52,
-    y: options.y + 1.7,
+    y: options.y + 1.68,
     w: 1.55,
     h: 0.16,
-    fontFace: "Meiryo",
     fontSize: 8,
     color: BRAND.muted,
     bold: true,
     align: "center",
-    margin: 0
+    margin: 0,
+    fit: "shrink"
   })
 
-  slide.addText(options.centerValue, {
+  addText(slide, options.centerValue, {
     x: options.x + 0.34,
-    y: options.y + 1.9,
+    y: options.y + 1.88,
     w: 2.0,
     h: 0.3,
-    fontFace: "Meiryo",
     fontSize: 16,
     color: BRAND.ink,
     bold: true,
@@ -583,16 +769,16 @@ function addDonutChartPanel(slide, options) {
   })
 
   if (options.centerCaption) {
-    slide.addText(options.centerCaption, {
+    addText(slide, options.centerCaption, {
       x: options.x + 0.38,
-      y: options.y + 2.26,
+      y: options.y + 2.22,
       w: 1.95,
       h: 0.16,
-      fontFace: "Meiryo",
       fontSize: 8,
       color: BRAND.muted,
       align: "center",
-      margin: 0
+      margin: 0,
+      fit: "shrink"
     })
   }
 
@@ -604,7 +790,7 @@ function addDonutChartPanel(slide, options) {
 
     addLegendCard(slide, {
       x: options.x + 2.72 + (column * 1.46),
-      y: options.y + 0.9 + (rowIndex * 1.08),
+      y: options.y + 0.88 + (rowIndex * 1.08),
       w: 1.34,
       h: 0.98,
       label: row.label,
@@ -622,26 +808,392 @@ function buildCategoryStatusText(statusCounts) {
     .join(" / ")
 }
 
-function addCategorySummarySlide(pptx, report, categoryReport) {
-  const slide = pptx.addSlide()
-  addSlideTitle(slide, `${categoryReport.category} カテゴリ`, "カテゴリサマリ")
+function buildContentSections(report) {
+  const sections = [
+    {
+      type: "overview",
+      title: "全体サマリ",
+      subtitle: "期間内の更新状況",
+      tocLabel: "全体サマリ",
+      kindLabel: "概要",
+      accentColor: BRAND.navy
+    }
+  ]
 
-  slide.addText(report.periodLabel, {
-    x: 8.9,
-    y: 0.96,
-    w: 3.68,
-    h: 0.24,
-    fontFace: "Meiryo",
-    fontSize: 10,
-    color: BRAND.muted,
-    align: "right",
-    margin: 0
+  if (report.updatedItems.length === 0) {
+    sections.push({
+      type: "empty",
+      title: "更新案件なし",
+      subtitle: "対象期間内に該当データがありません",
+      tocLabel: "更新案件なし",
+      kindLabel: "案内",
+      accentColor: BRAND.warning
+    })
+    return sections
+  }
+
+  report.categories.forEach((categoryReport) => {
+    const itemPages = chunkItems(categoryReport.items, DETAIL_ITEMS_PER_PAGE)
+
+    sections.push({
+      type: "categorySummary",
+      title: `${categoryReport.category} カテゴリ`,
+      subtitle: "カテゴリサマリ",
+      tocLabel: `${categoryReport.category} サマリ`,
+      kindLabel: "カテゴリ",
+      accentColor: BRAND.blue,
+      categoryReport
+    })
+
+    itemPages.forEach((items, pageIndex) => {
+      sections.push({
+        type: "categoryDetail",
+        title: `${categoryReport.category} 案件詳細`,
+        subtitle: "ステータス優先 / 更新日が新しい順",
+        tocLabel: `${categoryReport.category} 詳細 ${pageIndex + 1}/${itemPages.length}`,
+        kindLabel: "詳細",
+        accentColor: BRAND.cyan,
+        categoryReport,
+        items,
+        pageIndex,
+        pageCount: itemPages.length
+      })
+    })
   })
 
-  addMetricCard(slide, { x: 0.75, y: 1.55, label: "期間内更新", value: categoryReport.total, fillColor: BRAND.soft })
-  addMetricCard(slide, { x: 3.75, y: 1.55, label: "保留", value: categoryReport.statusCounts["保留"] || 0, valueColor: BRAND.danger })
-  addMetricCard(slide, { x: 6.75, y: 1.55, label: "クローズ", value: categoryReport.statusCounts["クローズ"] || 0, valueColor: BRAND.success })
-  addMetricCard(slide, { x: 9.75, y: 1.55, label: "報告メモ未入力", value: categoryReport.items.filter((item) => !String(item.reportMemo || "").trim()).length, valueColor: BRAND.warning })
+  return sections
+}
+
+function buildSlidePlan(report) {
+  const contentSections = buildContentSections(report)
+  const tocPages = Math.max(1, Math.ceil(contentSections.length / TOC_ENTRIES_PER_PAGE))
+  const slidePlan = [{
+    type: "cover",
+    title: report.title,
+    subtitle: "表紙",
+    accentColor: BRAND.navy
+  }]
+
+  for (let index = 0; index < tocPages; index += 1) {
+    slidePlan.push({
+      type: "toc",
+      title: "目次",
+      subtitle: tocPages > 1 ? `掲載内容 ${index + 1}/${tocPages}` : "掲載内容",
+      tocPageIndex: index,
+      tocPages,
+      accentColor: BRAND.blue
+    })
+  }
+
+  slidePlan.push(...contentSections)
+
+  slidePlan.forEach((slide, index) => {
+    slide.pageNumber = index + 1
+  })
+
+  const totalPages = slidePlan.length
+  const tocEntries = contentSections.map((section) => ({
+    label: section.tocLabel,
+    pageNumber: section.pageNumber,
+    kindLabel: section.kindLabel,
+    accentColor: section.accentColor
+  }))
+  const tocChunks = chunkItems(tocEntries, TOC_ENTRIES_PER_PAGE)
+
+  slidePlan.forEach((slide) => {
+    slide.totalPages = totalPages
+
+    if (slide.type === "toc") {
+      slide.entries = tocChunks[slide.tocPageIndex] || []
+    }
+  })
+
+  return slidePlan
+}
+
+function renderCoverSlide(slide, report, slideInfo) {
+  renderSlideFrame(slide, {
+    title: "定例報告書",
+    meta: report.periodLabel,
+    pageNumber: slideInfo.pageNumber,
+    totalPages: slideInfo.totalPages,
+    isCover: true
+  })
+
+  addPanel(slide, {
+    x: 0.72,
+    y: 1.18,
+    w: 6.1,
+    h: 5.0,
+    fillColor: "FFFFFF",
+    accentColor: BRAND.navy
+  })
+
+  addText(slide, "定例報告書", {
+    x: 1.06,
+    y: 1.52,
+    w: 4.8,
+    h: 0.42,
+    fontSize: 26,
+    bold: true,
+    color: BRAND.ink,
+    margin: 0,
+    fit: "shrink"
+  })
+
+  addText(slide, report.periodLabel, {
+    x: 1.06,
+    y: 2.12,
+    w: 4.8,
+    h: 0.22,
+    fontSize: 12,
+    bold: true,
+    color: BRAND.blue,
+    margin: 0,
+    fit: "shrink"
+  })
+
+  addMetricCard(slide, {
+    x: 7.15,
+    y: 1.28,
+    w: 2.55,
+    h: 1.0,
+    label: "対象案件",
+    value: report.metrics.total,
+    fillColor: BRAND.softAlt,
+    valueFontSize: 20,
+    accentColor: BRAND.navy
+  })
+
+  addMetricCard(slide, {
+    x: 9.96,
+    y: 1.28,
+    w: 2.55,
+    h: 1.0,
+    label: "期間内更新",
+    value: report.metrics.updated,
+    fillColor: BRAND.soft,
+    valueFontSize: 20,
+    accentColor: BRAND.blue
+  })
+
+  addMetricCard(slide, {
+    x: 7.15,
+    y: 2.5,
+    w: 2.55,
+    h: 1.0,
+    label: "カテゴリ数",
+    value: report.categories.length,
+    fillColor: "FFFFFF",
+    valueFontSize: 20,
+    accentColor: BRAND.cyan
+  })
+
+  addMetricCard(slide, {
+    x: 9.96,
+    y: 2.5,
+    w: 2.55,
+    h: 1.0,
+    label: "詳細対象",
+    value: report.updatedItems.length,
+    fillColor: "FFFFFF",
+    valueFontSize: 20,
+    accentColor: BRAND.success
+  })
+
+  addBulletList(
+    slide,
+    "出力日時",
+    [report.generatedAtLabel],
+    7.15,
+    3.75,
+    5.36,
+    1.0,
+    BRAND.warning
+  )
+}
+
+function renderTocSlide(slide, report, slideInfo) {
+  renderSlideFrame(slide, {
+    title: "目次",
+    meta: report.periodLabel,
+    pageNumber: slideInfo.pageNumber,
+    totalPages: slideInfo.totalPages
+  })
+
+  addText(slide, "掲載内容とページを一覧できます。", {
+    x: FRAME.marginX,
+    y: 1.1,
+    w: 8.0,
+    h: 0.18,
+    fontSize: 10,
+    color: BRAND.muted,
+    margin: 0,
+    fit: "shrink"
+  })
+
+  if (slideInfo.entries.length === 0) {
+    addBulletList(slide, "目次", ["項目がありません"], 0.75, 1.42, 11.84, 1.0, BRAND.blue)
+    return
+  }
+
+  slideInfo.entries.forEach((entry, index) => {
+    const column = index % 2
+    const row = Math.floor(index / 2)
+    const x = 0.75 + (column * 6.06)
+    const y = 1.4 + (row * 0.84)
+
+    addPanel(slide, {
+      x,
+      y,
+      w: 5.7,
+      h: 0.68,
+      fillColor: "FFFFFF",
+      accentColor: entry.accentColor
+    })
+
+    addText(slide, entry.label, {
+      x: x + 0.22,
+      y: y + 0.11,
+      w: 4.5,
+      h: 0.18,
+      fontSize: 11,
+      bold: true,
+      color: BRAND.ink,
+      margin: 0,
+      fit: "shrink"
+    })
+
+    addText(slide, entry.kindLabel, {
+      x: x + 0.22,
+      y: y + 0.37,
+      w: 1.2,
+      h: 0.12,
+      fontSize: 8,
+      color: BRAND.muted,
+      margin: 0,
+      fit: "shrink"
+    })
+
+    addText(slide, String(entry.pageNumber), {
+      x: x + 5.04,
+      y: y + 0.11,
+      w: 0.44,
+      h: 0.16,
+      fontSize: 10,
+      bold: true,
+      color: entry.accentColor,
+      align: "right",
+      margin: 0,
+      fit: "shrink"
+    })
+  })
+}
+
+function renderOverviewSlide(slide, report, slideInfo) {
+  renderSlideFrame(slide, {
+    title: "全体サマリ",
+    meta: report.periodLabel,
+    pageNumber: slideInfo.pageNumber,
+    totalPages: slideInfo.totalPages
+  })
+
+  addMetricCard(slide, { x: 0.75, y: 1.56, w: 2.75, h: 1.02, label: "対象案件", value: report.metrics.total, fillColor: BRAND.softAlt, valueFontSize: 22, accentColor: BRAND.navy })
+  addMetricCard(slide, { x: 3.65, y: 1.56, w: 2.75, h: 1.02, label: "期間内更新", value: report.metrics.updated, fillColor: BRAND.soft, valueFontSize: 22, accentColor: BRAND.blue })
+  addMetricCard(slide, { x: 6.55, y: 1.56, w: 2.75, h: 1.02, label: "完了", value: report.metrics.completed, valueColor: BRAND.success, valueFontSize: 22, accentColor: BRAND.success })
+  addMetricCard(slide, { x: 9.45, y: 1.56, w: 2.75, h: 1.02, label: "保留", value: report.metrics.onHold, valueColor: BRAND.danger, valueFontSize: 22, accentColor: BRAND.danger })
+
+  addText(slide, `更新なし ${report.metrics.stale}件 / 報告メモ未入力 ${report.metrics.noReportMemo}件 / カテゴリ ${report.categories.length}件 / 詳細対象 ${report.updatedItems.length}件`, {
+    x: 0.9,
+    y: 2.82,
+    w: 11.45,
+    h: 0.2,
+    fontSize: 10,
+    color: BRAND.muted,
+    align: "center",
+    margin: 0,
+    fit: "shrink"
+  })
+
+  const totalRankUnits = report.rankRows.reduce((total, row) => total + row.value, 0)
+  const totalRankCount = report.rankRows.reduce((total, row) => total + row.count, 0)
+
+  addDonutChartPanel(slide, {
+    x: 0.75,
+    y: 3.18,
+    w: 5.9,
+    h: 3.42,
+    title: "ステータス集計",
+    subtitle: "期間内更新案件の件数構成",
+    rows: report.statusRows,
+    centerTitle: "更新案件",
+    centerValue: `${report.metrics.updated}件`,
+    centerCaption: `${report.statusRows.length}ステータス`,
+    legendValue: (row) => `${row.value}件`,
+    legendCaption: (row) => report.metrics.updated > 0 ? `${((row.value / report.metrics.updated) * 100).toFixed(1)}%` : "0.0%"
+  })
+
+  addDonutChartPanel(slide, {
+    x: 6.7,
+    y: 3.18,
+    w: 5.85,
+    h: 3.42,
+    title: "ランク別",
+    subtitle: "ディールサイズの構成比",
+    rows: report.rankRows,
+    centerTitle: "総ディールサイズ",
+    centerValue: formatDealSizeUnitsLabel(totalRankUnits),
+    centerCaption: `${totalRankCount}件 / ${report.rankRows.length}ランク`,
+    legendValue: (row) => formatDealSizeUnitsLabel(row.value),
+    legendCaption: (row) => totalRankUnits > 0 ? `${((row.value / totalRankUnits) * 100).toFixed(1)}%` : "0.0%"
+  })
+}
+
+function renderEmptyStateSlide(slide, report, slideInfo) {
+  renderSlideFrame(slide, {
+    title: "更新案件なし",
+    meta: report.periodLabel,
+    pageNumber: slideInfo.pageNumber,
+    totalPages: slideInfo.totalPages
+  })
+
+  addPanel(slide, {
+    x: 0.9,
+    y: 1.8,
+    w: 11.5,
+    h: 2.0,
+    rectRadius: 0.08,
+    fillColor: BRAND.softAlt,
+    accentColor: BRAND.warning
+  })
+
+  addText(slide, `対象期間: ${report.periodLabel}\n現在の一覧条件に一致する更新案件はありません。`, {
+    x: 1.2,
+    y: 2.34,
+    w: 10.9,
+    h: 0.8,
+    fontSize: 18,
+    color: BRAND.ink,
+    bold: true,
+    align: "center",
+    valign: "mid",
+    margin: 0,
+    fit: "shrink"
+  })
+}
+
+function renderCategorySummarySlide(slide, report, categoryReport, slideInfo) {
+  renderSlideFrame(slide, {
+    title: `${categoryReport.category} カテゴリ`,
+    meta: report.periodLabel,
+    pageNumber: slideInfo.pageNumber,
+    totalPages: slideInfo.totalPages
+  })
+
+  addMetricCard(slide, { x: 0.75, y: 1.55, label: "期間内更新", value: categoryReport.total, fillColor: BRAND.soft, accentColor: BRAND.blue })
+  addMetricCard(slide, { x: 3.75, y: 1.55, label: "保留", value: categoryReport.statusCounts["保留"] || 0, valueColor: BRAND.danger, accentColor: BRAND.danger })
+  addMetricCard(slide, { x: 6.75, y: 1.55, label: "クローズ", value: categoryReport.statusCounts["クローズ"] || 0, valueColor: BRAND.success, accentColor: BRAND.success })
+  addMetricCard(slide, { x: 9.75, y: 1.55, label: "報告メモ未入力", value: categoryReport.items.filter((item) => !String(item.reportMemo || "").trim()).length, valueColor: BRAND.warning, accentColor: BRAND.warning })
 
   addBulletList(
     slide,
@@ -650,146 +1202,159 @@ function addCategorySummarySlide(pptx, report, categoryReport) {
     0.75,
     3.15,
     12.0,
-    1.25
+    1.25,
+    BRAND.blue
   )
-
-  addFooter(slide, `カテゴリ別に整理した定例報告書 | ${report.generatedAtLabel}`)
 }
 
-function addItemField(slide, label, value, x, y, w, h) {
-  slide.addText(`${label}: ${value}`, {
+function addItemField(slide, label, value, x, y, w, h, fontSize = 9) {
+  addText(slide, `${label}: ${value}`, {
     x,
     y,
     w,
     h,
-    fontFace: "Meiryo",
-    fontSize: 10,
+    fontSize,
     color: BRAND.ink,
     valign: "top",
-    margin: 0
+    margin: 0,
+    fit: "shrink"
   })
 }
 
-function addItemCard(slide, item, index) {
+function addItemContentBlock(slide, item, x, y, w, h) {
+  addPanel(slide, {
+    x,
+    y,
+    w,
+    h,
+    rectRadius: 0.06,
+    fillColor: BRAND.softAlt,
+    accentColor: BRAND.cyan
+  })
+
+  addText(slide, "内容", {
+    x: x + 0.16,
+    y: y + 0.08,
+    w: 0.5,
+    h: 0.14,
+    fontSize: 9,
+    bold: true,
+    color: BRAND.muted,
+    margin: 0,
+    fit: "shrink"
+  })
+
+  addText(slide, sanitizeText(item.content), {
+    x: x + 0.16,
+    y: y + 0.24,
+    w: w - 0.32,
+    h: h - 0.3,
+    fontSize: 11,
+    color: BRAND.ink,
+    valign: "top",
+    align: "left",
+    margin: 0,
+    fit: "shrink"
+  })
+}
+
+function addItemCard(slide, item, index, layout = "grid") {
+  const isStackedLayout = layout === "stacked"
   const column = index % 2
   const row = Math.floor(index / 2)
-  const x = 0.75 + column * 6.05
-  const y = 1.55 + row * 2.55
-  const w = 5.4
-  const h = 2.15
+  const x = isStackedLayout ? 0.75 : 0.75 + column * 6.05
+  const y = isStackedLayout ? 1.56 + index * 2.46 : 1.55 + row * 2.55
+  const w = isStackedLayout ? 11.83 : 5.4
+  const h = isStackedLayout ? 2.32 : 2.15
 
-  slide.addShape("roundRect", {
+  addPanel(slide, {
     x,
     y,
     w,
     h,
     rectRadius: 0.08,
-    line: { color: BRAND.border, pt: 1 },
-    fill: { color: "FFFFFF" }
+    fillColor: "FFFFFF",
+    accentColor: item.status === "保留" ? BRAND.danger : item.status === "クローズ" ? BRAND.success : BRAND.blue
   })
 
-  slide.addText(sanitizeText(item.title), {
-    x: x + 0.18,
+  addText(slide, sanitizeText(item.title), {
+    x: x + 0.2,
     y: y + 0.14,
-    w: w - 0.36,
-    h: 0.24,
-    fontFace: "Meiryo",
-    fontSize: 13,
+    w: w - 0.4,
+    h: 0.28,
+    fontSize: isStackedLayout ? 12 : 13,
     bold: true,
     color: BRAND.ink,
     margin: 0,
     fit: "shrink"
   })
 
-  slide.addText(
-    `${formatKpiDisplay(item.kpiNumber)} / ${sanitizeText(item.assignee)} / ${sanitizeText(item.status)} / 更新 ${formatDateOnly(item.updatedAt)}`,
-    {
-      x: x + 0.18,
-      y: y + 0.42,
-      w: w - 0.36,
-      h: 0.18,
-      fontFace: "Meiryo",
-      fontSize: 9,
-      color: BRAND.blue,
-      margin: 0,
-      fit: "shrink"
-    }
-  )
+  addText(slide, `${formatKpiDisplay(item.kpiNumber)} / ${sanitizeText(item.assignee)} / ${sanitizeText(item.status)} / 更新 ${formatDateOnly(item.updatedAt)}`, {
+    x: x + 0.2,
+    y: y + 0.46,
+    w: w - 0.4,
+    h: 0.18,
+    fontSize: isStackedLayout ? 8.5 : 9,
+    color: BRAND.blue,
+    margin: 0,
+    fit: "shrink"
+  })
 
-  addItemField(slide, "内容", sanitizeText(item.content), x + 0.18, y + 0.7, w - 0.36, 0.42)
-  addItemField(slide, "NextAction", sanitizeText(item.nextAction), x + 0.18, y + 1.12, w - 0.36, 0.34)
-  addItemField(slide, "報告メモ", sanitizeText(item.reportMemo), x + 0.18, y + 1.46, w - 0.36, 0.42)
+  const contentY = isStackedLayout ? y + 0.74 : y + 0.7
+  const nextActionY = isStackedLayout ? y + 1.12 : y + 1.12
+  const reportMemoY = isStackedLayout ? y + 1.44 : y + 1.46
+  const customerY = isStackedLayout ? y + 1.78 : y + 1.8
+  const contentH = isStackedLayout ? 0.34 : 0.42
+  const nextActionH = isStackedLayout ? 0.3 : 0.34
+  const reportMemoH = isStackedLayout ? 0.34 : 0.42
+  const customerH = isStackedLayout ? 0.22 : 0.24
+
+  if (isStackedLayout) {
+    addItemField(slide, "NextAction", sanitizeText(item.nextAction), x + 0.2, nextActionY, 3.55, nextActionH)
+    addItemField(slide, "報告メモ", sanitizeText(item.reportMemo), x + 0.2, reportMemoY, 3.55, reportMemoH)
+
+    if (item.category === "営業") {
+      addItemField(
+        slide,
+        "顧客/ランク/ディールサイズ",
+        `${sanitizeText(item.customer)} / ${sanitizeText(item.rank)} / ${formatDealSizeDisplay(item.dealSize)}`,
+        x + 0.2,
+        customerY,
+        3.55,
+        customerH
+      )
+    }
+
+    addItemContentBlock(slide, item, x + 3.95, y + 0.22, 7.66, 1.92)
+    return
+  }
+
+  addItemField(slide, "内容", sanitizeText(item.content), x + 0.2, contentY, w - 0.4, contentH, 11)
+  addItemField(slide, "NextAction", sanitizeText(item.nextAction), x + 0.2, nextActionY, w - 0.4, nextActionH)
+  addItemField(slide, "報告メモ", sanitizeText(item.reportMemo), x + 0.2, reportMemoY, w - 0.4, reportMemoH)
 
   if (item.category === "営業") {
     addItemField(
       slide,
       "顧客/ランク/ディールサイズ",
       `${sanitizeText(item.customer)} / ${sanitizeText(item.rank)} / ${formatDealSizeDisplay(item.dealSize)}`,
-      x + 0.18,
-      y + 1.8,
-      w - 0.36,
-      0.24
+      x + 0.2,
+      customerY,
+      w - 0.4,
+      customerH
     )
   }
 }
 
-function addCategoryDetailSlides(pptx, report, categoryReport) {
-  const itemPages = chunkItems(categoryReport.items, 4)
-
-  itemPages.forEach((items, pageIndex) => {
-    const slide = pptx.addSlide()
-    const suffix = itemPages.length > 1 ? ` ${pageIndex + 1}/${itemPages.length}` : ""
-    addSlideTitle(slide, `${categoryReport.category} 案件詳細${suffix}`, "カテゴリ詳細")
-
-    slide.addText(
-      `並び順: ステータス優先 / 更新日が新しい順`,
-      {
-        x: 8.2,
-        y: 0.96,
-        w: 4.4,
-        h: 0.2,
-        fontFace: "Meiryo",
-        fontSize: 9,
-        color: BRAND.muted,
-        align: "right",
-        margin: 0
-      }
-    )
-
-    items.forEach((item, index) => addItemCard(slide, item, index))
-    addFooter(slide, `${categoryReport.category} | ${report.periodLabel}`)
-  })
-}
-
-function addEmptyStateSlide(pptx, report) {
-  const slide = pptx.addSlide()
-  addSlideTitle(slide, "期間内の更新案件はありません", "定例報告書")
-
-  slide.addShape("roundRect", {
-    x: 0.9,
-    y: 1.8,
-    w: 11.5,
-    h: 2.0,
-    rectRadius: 0.08,
-    line: { color: BRAND.border, pt: 1 },
-    fill: { color: BRAND.softAlt }
+function renderCategoryDetailSlide(slide, report, categoryReport, slideInfo) {
+  renderSlideFrame(slide, {
+    title: `${categoryReport.category} 案件詳細`,
+    meta: report.periodLabel,
+    pageNumber: slideInfo.pageNumber,
+    totalPages: slideInfo.totalPages
   })
 
-  slide.addText(`対象期間: ${report.periodLabel}\n現在の一覧条件に一致する更新案件はありません。`, {
-    x: 1.2,
-    y: 2.35,
-    w: 10.9,
-    h: 0.8,
-    fontFace: "Meiryo",
-    fontSize: 18,
-    color: BRAND.ink,
-    bold: true,
-    align: "center",
-    valign: "mid",
-    margin: 0
-  })
-
-  addFooter(slide, `カテゴリ別に整理した定例報告書 | ${report.generatedAtLabel}`)
+  slideInfo.items.forEach((item, index) => addItemCard(slide, item, index, "stacked"))
 }
 
 export async function buildPowerPointArrayBuffer(report) {
@@ -801,132 +1366,39 @@ export async function buildPowerPointArrayBuffer(report) {
   pptx.title = `${report.title} ${report.periodLabel}`
   pptx.lang = "ja-JP"
 
-  const titleSlide = pptx.addSlide()
-  titleSlide.background = { color: "F7FBFD" }
-  titleSlide.addShape("rect", {
-    x: 0,
-    y: 0,
-    w: 13.33,
-    h: 0.78,
-    line: { color: BRAND.navy, transparency: 100 },
-    fill: { color: BRAND.navy }
-  })
-  titleSlide.addText("定例報告書", {
-    x: 0.75,
-    y: 1.1,
-    w: 5.8,
-    h: 0.55,
-    fontFace: "Meiryo",
-    fontSize: 27,
-    bold: true,
-    color: BRAND.ink,
-    margin: 0
-  })
-  titleSlide.addText(report.periodLabel, {
-    x: 0.75,
-    y: 1.72,
-    w: 4.8,
-    h: 0.24,
-    fontFace: "Meiryo",
-    fontSize: 13,
-    color: BRAND.blue,
-    bold: true,
-    margin: 0
-  })
-  titleSlide.addShape("roundRect", {
-    x: 0.75,
-    y: 2.3,
-    w: 5.95,
-    h: 1.3,
-    rectRadius: 0.08,
-    line: { color: BRAND.border, pt: 1 },
-    fill: { color: "FFFFFF" }
-  })
-  titleSlide.addText(`出力日時: ${report.generatedAtLabel}\n対象件数: ${report.metrics.updated}件`, {
-    x: 1.0,
-    y: 2.68,
-    w: 5.4,
-    h: 0.56,
-    fontFace: "Meiryo",
-    fontSize: 13,
-    color: BRAND.ink,
-    margin: 0
-  })
-  addBulletList(titleSlide, "現在の絞り込み条件", report.filters, 7.15, 1.2, 5.4, 2.4)
-  addBulletList(
-    titleSlide,
-    "構成",
-    ["・全体サマリ", "・カテゴリ別サマリ", "・カテゴリ別の案件詳細"],
-    0.75,
-    4.15,
-    11.8,
-    1.4
-  )
-  addFooter(titleSlide, "Progress Management | PowerPoint Export")
+  const slidePlan = buildSlidePlan(report)
 
-  const overviewSlide = pptx.addSlide()
-  addSlideTitle(overviewSlide, "全体サマリ", "定例報告書")
-  addMetricCard(overviewSlide, { x: 0.75, y: 1.6, w: 2.75, h: 1.02, label: "対象案件", value: report.metrics.total, fillColor: BRAND.softAlt, valueFontSize: 22 })
-  addMetricCard(overviewSlide, { x: 3.65, y: 1.6, w: 2.75, h: 1.02, label: "期間内更新", value: report.metrics.updated, fillColor: BRAND.soft, valueFontSize: 22 })
-  addMetricCard(overviewSlide, { x: 6.55, y: 1.6, w: 2.75, h: 1.02, label: "完了", value: report.metrics.completed, valueColor: BRAND.success, valueFontSize: 22 })
-  addMetricCard(overviewSlide, { x: 9.45, y: 1.6, w: 2.75, h: 1.02, label: "保留", value: report.metrics.onHold, valueColor: BRAND.danger, valueFontSize: 22 })
+  slidePlan.forEach((slideInfo) => {
+    const slide = pptx.addSlide()
 
-  overviewSlide.addText(
-    `更新なし ${report.metrics.stale}件 / 報告メモ未入力 ${report.metrics.noReportMemo}件 / カテゴリ ${report.categories.length}件 / 詳細対象 ${report.updatedItems.length}件`,
-    {
-      x: 0.9,
-      y: 2.88,
-      w: 11.45,
-      h: 0.2,
-      fontFace: "Meiryo",
-      fontSize: 10,
-      color: BRAND.muted,
-      align: "center",
-      margin: 0
+    if (slideInfo.type === "cover") {
+      renderCoverSlide(slide, report, slideInfo)
+      return
     }
-  )
 
-  const totalRankUnits = report.rankRows.reduce((total, row) => total + row.value, 0)
-  const totalRankCount = report.rankRows.reduce((total, row) => total + row.count, 0)
+    if (slideInfo.type === "toc") {
+      renderTocSlide(slide, report, slideInfo)
+      return
+    }
 
-  addDonutChartPanel(overviewSlide, {
-    x: 0.75,
-    y: 3.22,
-    w: 5.9,
-    h: 3.45,
-    title: "ステータス集計",
-    subtitle: "期間内更新案件の件数構成",
-    rows: report.statusRows,
-    centerTitle: "更新案件",
-    centerValue: `${report.metrics.updated}件`,
-    centerCaption: `${report.statusRows.length}ステータス`,
-    legendValue: (row) => `${row.value}件`,
-    legendCaption: (row) => report.metrics.updated > 0 ? `${((row.value / report.metrics.updated) * 100).toFixed(1)}%` : "0.0%"
-  })
+    if (slideInfo.type === "overview") {
+      renderOverviewSlide(slide, report, slideInfo)
+      return
+    }
 
-  addDonutChartPanel(overviewSlide, {
-    x: 6.7,
-    y: 3.22,
-    w: 5.85,
-    h: 3.45,
-    title: "ランク別",
-    subtitle: "ディールサイズの構成比",
-    rows: report.rankRows,
-    centerTitle: "総ディールサイズ",
-    centerValue: formatDealSizeUnitsLabel(totalRankUnits),
-    centerCaption: `${totalRankCount}件 / ${report.rankRows.length}ランク`,
-    legendValue: (row) => formatDealSizeUnitsLabel(row.value),
-    legendCaption: (row) => totalRankUnits > 0 ? `${((row.value / totalRankUnits) * 100).toFixed(1)}%` : "0.0%"
-  })
-  addFooter(overviewSlide, `${report.periodLabel} | ${report.generatedAtLabel}`)
+    if (slideInfo.type === "empty") {
+      renderEmptyStateSlide(slide, report, slideInfo)
+      return
+    }
 
-  if (report.updatedItems.length === 0) {
-    addEmptyStateSlide(pptx, report)
-  }
+    if (slideInfo.type === "categorySummary") {
+      renderCategorySummarySlide(slide, report, slideInfo.categoryReport, slideInfo)
+      return
+    }
 
-  report.categories.forEach((categoryReport) => {
-    addCategorySummarySlide(pptx, report, categoryReport)
-    addCategoryDetailSlides(pptx, report, categoryReport)
+    if (slideInfo.type === "categoryDetail") {
+      renderCategoryDetailSlide(slide, report, slideInfo.categoryReport, slideInfo)
+    }
   })
 
   return pptx.write({ outputType: "arraybuffer" })

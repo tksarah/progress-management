@@ -2116,7 +2116,7 @@ export default function App() {
         </div>
       </header>
 
-      <div className="app-version">Version v0.5</div>
+      <div className="app-version">Version v0.6</div>
 
       {startupState ? (
         <StartupWizard
