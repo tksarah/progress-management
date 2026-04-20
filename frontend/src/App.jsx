@@ -1222,6 +1222,7 @@ export default function App() {
   const [duplicateForm, setDuplicateForm] = useState(null)
   const [duplicateSourceLabel, setDuplicateSourceLabel] = useState("")
   const [duplicateSaving, setDuplicateSaving] = useState(false)
+  const [summaryCollapsed, setSummaryCollapsed] = useState(false)
   const [duplicateError, setDuplicateError] = useState("")
   const [deleteTarget, setDeleteTarget] = useState(null)
   const [startupState, setStartupState] = useState(null)
@@ -1343,13 +1344,34 @@ export default function App() {
   }, [appSettings.visibleColumns])
 
   const filteredItems = useMemo(() => {
+    const q = String(query || "").trim().toLowerCase()
+
     return items.filter((item) => {
+      const matchesStatus = statusFilter ? (item.status || "") === statusFilter : true
       const matchesKpi = kpiFilter ? item.kpiNumber === kpiFilter : true
       const matchesCategory = categoryFilter ? item.category === categoryFilter : true
 
-      return matchesKpi && matchesCategory
+      if (!(matchesStatus && matchesKpi && matchesCategory)) {
+        return false
+      }
+
+      if (!q) {
+        return true
+      }
+
+      const haystack = [
+        item.title,
+        item.content,
+        item.reportMemo,
+        item.assignee,
+        item.kpiNumber,
+        item.category,
+        item.customer
+      ].map((v) => String(v || "").toLowerCase()).join(" ")
+
+      return haystack.includes(q)
     })
-  }, [items, kpiFilter, categoryFilter])
+  }, [items, kpiFilter, categoryFilter, statusFilter, query])
 
   const summaryCards = useMemo(() => {
     const counts = new Map()
@@ -2116,7 +2138,7 @@ export default function App() {
         </div>
       </header>
 
-      <div className="app-version">Version v0.6</div>
+      <div className="app-version">Version v0.6.2</div>
 
       {startupState ? (
         <StartupWizard
@@ -2136,8 +2158,18 @@ export default function App() {
             <button type="button" onClick={handleExportExcel} disabled={saving}>エクスポート</button>
             <button type="button" className="settings-button" onClick={handleOpenSettings} disabled={saving || loading}>設定</button>
           </div>
-          <div className="card summary-card">
-            <h2>ステータス集計</h2>
+          <div className={`card summary-card ${summaryCollapsed ? "collapsed" : ""}`}>
+            <div className="summary-head">
+              <h2>ステータス集計</h2>
+              <button
+                type="button"
+                className="collapse-toggle"
+                onClick={() => setSummaryCollapsed((s) => !s)}
+                aria-expanded={!summaryCollapsed}
+              >
+                {summaryCollapsed ? "展開" : "折りたたむ"}
+              </button>
+            </div>
             <div className="summary-list">
               <article className="summary-chip total-chip">
                 <span>総件数</span>
@@ -2180,7 +2212,10 @@ export default function App() {
           <div className="filters filters-extended">
             <input
               value={query}
-              onChange={(event) => setQuery(event.target.value)}
+              onChange={(event) => {
+                setQuery(event.target.value)
+                setCurrentPage(1)
+              }}
               placeholder="KPI番号・カテゴリ・担当者・内容・報告メモで検索"
             />
             <button type="button" onClick={() => void loadData(query, statusFilter)}>検索</button>

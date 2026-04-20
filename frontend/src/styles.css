@@ -273,6 +273,29 @@ textarea {
   justify-items: center;
 }
 
+.summary-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.collapse-toggle {
+  background: rgba(255,255,255,0.96);
+  color: #0d5ea6;
+  border: 1px solid rgba(13,94,166,0.12);
+  padding: 6px 10px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.card.collapsed .summary-list,
+.card.collapsed .summary-breakdown {
+  display: none;
+}
+
 .rank-chart-panel {
   display: grid;
   width: min(100%, 860px);

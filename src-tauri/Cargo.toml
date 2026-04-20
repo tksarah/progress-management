@@ -1,6 +1,6 @@
 [package]
 name = "progress-tracker-poc"
-version = "0.5.0"
+version = "0.6.2"
 description = "Serverless desktop progress tracker using Tauri"
 authors = ["GitHub Copilot"]
 edition = "2021"
